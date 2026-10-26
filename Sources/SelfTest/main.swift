@@ -28,9 +28,9 @@ func expectEqual<T: Equatable>(_ a: T, _ b: T, _ label: String) {
 
 do {
     print("TimeFormat + previewLine")
-    var cal = Calendar(identifier: .gregorian)
-    cal.locale = Locale(identifier: "zh_CN")
-    let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 26, hour: 12))!
+    // Anchor to the real current day so isDateInToday-based branches hold on any run date.
+    let cal = Calendar.current
+    let now = cal.date(byAdding: DateComponents(hour: 12), to: cal.startOfDay(for: Date()))!
     expectEqual(TimeFormat.relative(now.addingTimeInterval(-10), now: now), "刚刚", "relative 10s")
     expectEqual(TimeFormat.relative(now.addingTimeInterval(-300), now: now), "5 分钟前", "relative 5min")
     expectEqual(TimeFormat.relative(now.addingTimeInterval(-3_600), now: now), "1 小时前", "relative 1h")
