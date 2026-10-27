@@ -23,11 +23,16 @@ struct NotchRootView: View {
 
 // MARK: - Collapsed strip
 
-struct CollapsedStrip: View {
+public struct CollapsedStrip: View {
     let model: NotchModel
     let info: NotchDisplayInfo
 
-    var body: some View {
+    public init(model: NotchModel, info: NotchDisplayInfo) {
+        self.model = model
+        self.info = info
+    }
+
+    public var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 0) {
                 LeftIslandText()
@@ -84,7 +89,8 @@ private struct LeftIslandText: View {
     }()
     static let day: DateFormatter = {
         let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate("Mdw")
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日 EEE"
         return f
     }()
 }
@@ -132,11 +138,16 @@ struct StripShape: Shape {
 
 // MARK: - Expanded panel
 
-struct ExpandedPanel: View {
+public struct ExpandedPanel: View {
     let model: NotchModel
     let info: NotchDisplayInfo
 
-    var body: some View {
+    public init(model: NotchModel, info: NotchDisplayInfo) {
+        self.model = model
+        self.info = info
+    }
+
+    public var body: some View {
         VStack(spacing: 0) {
             Color.black.frame(height: info.headerHeight)
             if model.vaultLocked {
@@ -146,21 +157,19 @@ struct ExpandedPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            ZStack {
-                VisualEffectView(material: .hudWindow)
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 18, bottomLeadingRadius: 22,
-                    bottomTrailingRadius: 22, topTrailingRadius: 18
-                )
-                .stroke(.white.opacity(0.10), lineWidth: 1)
-            }
-            .clipShape(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 18, bottomLeadingRadius: 22,
-                    bottomTrailingRadius: 22, topTrailingRadius: 18
-                )
+        .background(VisualEffectView(material: .hudWindow))
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 18, bottomLeadingRadius: 22,
+                bottomTrailingRadius: 22, topTrailingRadius: 18
             )
+        )
+        .overlay(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 18, bottomLeadingRadius: 22,
+                bottomTrailingRadius: 22, topTrailingRadius: 18
+            )
+            .stroke(.white.opacity(0.10), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.4), radius: 28, y: 14)
     }
@@ -172,6 +181,21 @@ private struct PanelContent: View {
     var body: some View {
         VStack(spacing: 10) {
             SearchFieldView(model: model)
+                .padding(.leading, 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.primary.opacity(0.07))
+                )
+                .overlay(alignment: .leading) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 9)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.primary.opacity(0.08))
+                )
             FilterChips(model: model)
 
             if model.showAccessibilityHint {

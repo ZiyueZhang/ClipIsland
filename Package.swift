@@ -30,6 +30,14 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
+        ),
+        .executableTarget(
+            name: "RenderTool",
+            dependencies: ["ClipIslandCore"],
+            path: "Sources/RenderTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )

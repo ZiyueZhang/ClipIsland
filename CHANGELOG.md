@@ -3,6 +3,18 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.2.1] - 2026-10-28
+
+### Fixed (first visual audit — offscreen render harness added)
+- **Collapsed strip was invisible in production**: the 216pt strip window sat entirely behind the opaque hardware notch, hiding the clock and clip count. The strip now extends into the menu-bar areas on both sides (clock left, count right) and fuses with the notch in the middle; its window doubles as a much larger hover/click target
+- Date format rendered as "(周: 43)" — now "10月28日 周三"
+- Expanded panel corners were square: the clip shape only covered the background, not the content — now the whole island clips and the shadow follows
+- Search field had no visible container — now a rounded field with a magnifier icon
+- Post-capture bar thumbnail now has inner padding
+
+### Added
+- `RenderTool`: offscreen snapshot harness that renders every island surface (panel dark/light, empty, locked, strip, popup) to PNG without screen-recording permission — the visual regression loop for future iterations
+
 ## [1.2.0] - 2026-10-27
 
 ### Added

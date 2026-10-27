@@ -6,12 +6,13 @@ import SwiftUI
 /// Copy / Edit / Reveal, auto-dismisses, hover pauses the countdown.
 /// (shotx-style popup-first flow; the editor becomes an explicit choice.)
 @Observable
-final class PostCaptureModel {
-    var thumbnail: NSImage?
-    var canReveal = false
-    var onCopy: () -> Void = {}
-    var onEdit: () -> Void = {}
-    var onReveal: () -> Void = {}
+public final class PostCaptureModel {
+    public init() {}
+    public var thumbnail: NSImage?
+    public var canReveal = false
+    public var onCopy: () -> Void = {}
+    public var onEdit: () -> Void = {}
+    public var onReveal: () -> Void = {}
 }
 
 public final class PostCaptureBar {
@@ -109,11 +110,16 @@ public final class PostCaptureBar {
 
 // MARK: - Content
 
-struct PostCaptureContentView: View {
+public struct PostCaptureContentView: View {
     let model: PostCaptureModel
     let onHoverChange: (Bool) -> Void
 
-    var body: some View {
+    public init(model: PostCaptureModel, onHoverChange: @escaping (Bool) -> Void) {
+        self.model = model
+        self.onHoverChange = onHoverChange
+    }
+
+    public var body: some View {
         VStack(spacing: 10) {
             if let image = model.thumbnail {
                 Image(nsImage: image)

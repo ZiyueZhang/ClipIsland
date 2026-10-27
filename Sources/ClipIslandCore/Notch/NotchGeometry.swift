@@ -14,6 +14,11 @@ public struct NotchLayout {
 
     public static let panelSize = CGSize(width: 660, height: 430)
     public static let simulatedNotch = CGSize(width: 210, height: 32)
+    /// The collapsed strip extends past the hardware notch into the menu-bar
+    /// areas on both sides so its content is actually visible — the notch
+    /// itself is opaque hardware that would hide anything drawn over it.
+    public static let stripExtensionLeft: CGFloat = 150
+    public static let stripExtensionRight: CGFloat = 110
 
     /// Snaps a point value to the screen's physical pixel grid.
     static func snap(_ v: CGFloat, scale: CGFloat) -> CGFloat {
@@ -50,9 +55,9 @@ public struct NotchLayout {
         let topY = visible.maxY
         let collapsed = snap(
             CGRect(
-                x: visible.midX - width / 2,
+                x: visible.midX - width / 2 - Self.stripExtensionLeft,
                 y: topY - height,
-                width: width,
+                width: width + Self.stripExtensionLeft + Self.stripExtensionRight,
                 height: height
             ),
             scale: scale

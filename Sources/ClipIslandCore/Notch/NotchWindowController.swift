@@ -54,7 +54,10 @@ public final class NotchWindowController {
         NotchDisplayInfo(
             hasRealNotch: layout.hasRealNotch,
             headerHeight: layout.notchHeight,
-            panelWidth: NotchLayout.panelSize.width
+            panelWidth: NotchLayout.panelSize.width,
+            notchWidth: layout.notchWidth,
+            stripExtensionLeft: NotchLayout.stripExtensionLeft,
+            stripExtensionRight: NotchLayout.stripExtensionRight
         )
     }
 
@@ -171,10 +174,23 @@ public struct NotchDisplayInfo {
     public let hasRealNotch: Bool
     public let headerHeight: CGFloat
     public let panelWidth: CGFloat
+    public let notchWidth: CGFloat
+    public let stripExtensionLeft: CGFloat
+    public let stripExtensionRight: CGFloat
 
-    public init(hasRealNotch: Bool, headerHeight: CGFloat, panelWidth: CGFloat) {
+    public init(
+        hasRealNotch: Bool,
+        headerHeight: CGFloat,
+        panelWidth: CGFloat,
+        notchWidth: CGFloat,
+        stripExtensionLeft: CGFloat,
+        stripExtensionRight: CGFloat
+    ) {
         self.hasRealNotch = hasRealNotch
         self.headerHeight = headerHeight
         self.panelWidth = panelWidth
+        self.notchWidth = notchWidth
+        self.stripExtensionLeft = stripExtensionLeft
+        self.stripExtensionRight = stripExtensionRight
     }
 }
