@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     var appCoordinator: AppCoordinator?
@@ -30,6 +31,8 @@ public final class AppCoordinator: NSObject {
     private var editors: [EditorWindowController] = []
     private var settingsWindow: SettingsWindowController?
     private var ocrWindow: OCRResultWindowController?
+    private let hoverMonitor = MenuBarHoverMonitor()
+    private let postCaptureBar = PostCaptureBar()
 
     public override init() {
         super.init()
@@ -78,6 +81,7 @@ public final class AppCoordinator: NSObject {
         }
 
         notchWindow = NotchWindowController(model: notchModel)
+        wireHoverMonitor()
         wireSettingsWindow()
         buildStatusBarMenu()
         installTestHook()
@@ -87,6 +91,19 @@ public final class AppCoordinator: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.openSettings()
             }
+        }
+    }
+
+    /// The island can be summoned by resting the pointer anywhere in the
+    /// menu bar (tendedero-style), not just on the 220pt notch itself.
+    private func wireHoverMonitor() {
+        hoverMonitor.onDwell = { [weak self] in
+            guard let self else { return }
+            self.notchModel.expand()
+        }
+        hoverMonitor.start { [weak self] in
+            guard let self else { return false }
+            return self.notchModel.phase == .collapsed && self.notchModel.expandOnHover
         }
     }
 
@@ -146,33 +163,59 @@ public final class AppCoordinator: NSObject {
 
     private func deliverScreenshot(_ image: CGImage) {
         guard let png = CaptureService.shared.pngData(from: image) else { return }
-        let nsimage = NSImage(cgImage: image, size: NSSize(
-            width: image.width, height: image.height
-        ))
-        notchModel.flashHangingImage(nsimage)
 
-        let item = store?.add(
+        store?.add(
             NewClip(
                 kind: .image, imageData: png,
                 sourceBundle: Bundle.main.bundleIdentifier, sourceName: "ClipIsland 截图"
             )
         )
 
-        // Immediately pasteable, without re-recording our own write.
-        if let path = item?.imagePath, let data = FileManager.default.contents(atPath: path) {
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setData(data, forType: .png)
-            monitor.markOwnWrite()
+        // Hanging thumbnail at display size — never decodes the capture at
+        // full resolution just to show a 64pt strip.
+        if let thumb = Self.downsampledPNG(png, maxPixel: 480) {
+            notchModel.flashHangingImage(thumb)
         }
 
-        if settings.saveScreenshotsToFile {
-            CaptureService.shared.savePNG(image, to: URL(fileURLWithPath: settings.screenshotSaveDirectory))
-        }
+        // Immediately pasteable (PNG + TIFF), without re-recording our own write.
+        AutoPaster.writeImageFlavors(.general, pngData: png)
+        monitor.markOwnWrite()
+
+        let savedURL = settings.saveScreenshotsToFile
+            ? CaptureService.shared.savePNG(image, to: URL(fileURLWithPath: settings.screenshotSaveDirectory))
+            : nil
 
         if settings.openEditorAfterCapture {
             openEditor(image: image)
+        } else {
+            postCaptureBar.show(
+                thumbnail: Self.downsampledPNG(png, maxPixel: 500) ?? NSImage(),
+                onCopy: { [weak self] in
+                    guard let self else { return }
+                    AutoPaster.writeImageFlavors(.general, pngData: png)
+                    self.monitor.markOwnWrite()
+                },
+                onEdit: { [weak self] in self?.openEditor(image: image) },
+                onReveal: savedURL.map { url in
+                    { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                }
+            )
         }
+    }
+
+    /// ImageIO thumbnail straight off the encoded data; never decodes the
+    /// full-resolution bitmap.
+    private static func downsampledPNG(_ data: Data, maxPixel: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
     // MARK: - Editor
@@ -226,9 +269,7 @@ public final class AppCoordinator: NSObject {
         guard let png = CaptureService.shared.pngData(from: image) else { return }
         switch kind {
         case .copy:
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            pb.setData(png, forType: .png)
+            AutoPaster.writeImageFlavors(.general, pngData: png)
             monitor.markOwnWrite()
             store?.add(
                 NewClip(kind: .image, imageData: png,
@@ -396,6 +437,25 @@ public final class AppCoordinator: NSObject {
         }()
         case "settings":
             openSettings()
+        case "popup": {
+            let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+            let ctx = CGContext(
+                data: nil, width: 900, height: 560,
+                bitsPerComponent: 8, bytesPerRow: 900 * 4,
+                space: srgb,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            ctx.setFillColor(CGColor(srgbRed: 0.15, green: 0.4, blue: 0.9, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: 900, height: 560))
+            guard let image = ctx.makeImage(),
+                  let png = CaptureService.shared.pngData(from: image) else { return }
+            postCaptureBar.show(
+                thumbnail: Self.downsampledPNG(png, maxPixel: 500) ?? NSImage(),
+                onCopy: { log("popup copy tapped") },
+                onEdit: { log("popup edit tapped") },
+                onReveal: { log("popup reveal tapped") }
+            )
+        }()
         case "kindfilter":
             notchModel.kindFilter = notchModel.kindFilter == .link ? nil : .link
             notchModel.reloadResults()

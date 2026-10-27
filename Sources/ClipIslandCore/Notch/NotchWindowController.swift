@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Borderless panel that can become key (keyboard routing happens in M3).
+/// Borderless panel that can become key (keyboard routing happens here).
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
@@ -14,65 +14,10 @@ final class NotchPanel: NSPanel {
     }
 }
 
-/// Deterministic window-frame interpolation. NSWindow's animator-proxy frame
-/// animation is unreliable under a SwiftUI-driven content view, so we drive
-/// the frame ourselves with a timer and an ease-in-out curve.
-final class FrameAnimator {
-    private var timer: Timer?
-    private let from: CGRect
-    private let to: CGRect
-    private let startedAt: Date
-    private let duration: Double
-    private let apply: (CGRect) -> Void
-
-    init?(from: CGRect, to: CGRect, duration: Double, apply: @escaping (CGRect) -> Void) {
-        guard from != to else { return nil }
-        self.from = from
-        self.to = to
-        self.duration = duration
-        self.apply = apply
-        self.startedAt = Date()
-        let timer = Timer(timeInterval: 1.0 / 90.0, repeats: true) { [weak self] _ in
-            self?.tick()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
-    }
-
-    private func tick() {
-        let raw = Date().timeIntervalSince(startedAt) / duration
-        guard raw < 1 else {
-            stop()
-            apply(to)
-            return
-        }
-        apply(interpolate(from, to, easeInOut(clamp(raw))))
-    }
-
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-    }
-
-    private func clamp(_ t: Double) -> Double { min(max(t, 0), 1) }
-
-    private func easeInOut(_ t: Double) -> Double {
-        t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-    }
-
-    private func interpolate(_ a: CGRect, _ b: CGRect, _ t: Double) -> CGRect {
-        let f = CGFloat(t)
-        return CGRect(
-            x: a.origin.x + (b.origin.x - a.origin.x) * f,
-            y: a.origin.y + (b.origin.y - a.origin.y) * f,
-            width: a.width + (b.width - a.width) * f,
-            height: a.height + (b.height - a.height) * f
-        )
-    }
-}
-
 /// Owns the always-on-top window above the notch/menu-bar area and animates
-/// its frame between the collapsed strip and the expanded panel.
+/// its frame between the collapsed strip and the expanded panel. Frame motion
+/// runs on a spring (FrameAnimator) so it reads as one system with the
+/// SwiftUI content springs inside.
 public final class NotchWindowController {
     public let model: NotchModel
     private var panel: NotchPanel!
@@ -113,6 +58,12 @@ public final class NotchWindowController {
         )
     }
 
+    // MARK: Island screen facts (used by the menu-bar hover monitor)
+
+    public var islandScreenFrame: CGRect { layout.screen.frame }
+    public var islandScreenVisibleFrame: CGRect { layout.screen.visibleFrame }
+    public var islandScreenTopInset: CGFloat { layout.screen.safeAreaInsets.top }
+
     private func buildPanel() {
         let p = NotchPanel(
             contentRect: layout.collapsedFrame,
@@ -145,16 +96,21 @@ public final class NotchWindowController {
 
     private func apply(phase: NotchModel.Phase, animated: Bool) {
         let target = phase == .collapsed ? collapsedTarget() : layout.expandedFrame
-        frameAnimator?.stop()
+        frameAnimator?.cancel()
         guard animated else {
             panel.setFrame(target, display: true)
             if phase == .expanded { panel.makeKeyAndOrderFront(nil); focusSearchField() }
             return
         }
+        // Collapse is near-critically damped (no bounce); expand has a light spring.
+        let response: Double = phase == .collapsed ? 0.32 : 0.42
+        let damping: Double = phase == .collapsed ? 1.0 : 0.82
         frameAnimator = FrameAnimator(
             from: panel.frame,
             to: target,
-            duration: 0.30
+            response: response,
+            dampingFraction: damping,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         ) { [weak self] frame in
             self?.panel.setFrame(frame, display: true)
         }
@@ -200,7 +156,7 @@ public final class NotchWindowController {
         }
     }
 
-    /// Used by the screenshot flow (M5) to keep the island out of captures.
+    /// Used by the screenshot flow to keep the island out of captures.
     public func setIsland(hidden: Bool) {
         if hidden {
             panel.orderOut(nil)

@@ -37,7 +37,7 @@ public final class SettingsStore {
     }
 
     public var openEditorAfterCapture: Bool {
-        get { defaults.object(forKey: "openEditorAfterCapture") as? Bool ?? true }
+        get { defaults.object(forKey: "openEditorAfterCapture") as? Bool ?? false }
         set { defaults.set(newValue, forKey: "openEditorAfterCapture") }
     }
 

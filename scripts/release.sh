@@ -9,7 +9,7 @@ APP="build/ClipIsland.app"
 ZIP="build/ClipIsland-${VERSION}.zip"
 
 echo "==> building release"
-./scripts/build-app.sh release
+./scripts/build-app.sh release "$VERSION"
 
 echo "==> packaging $ZIP"
 rm -f "$ZIP"

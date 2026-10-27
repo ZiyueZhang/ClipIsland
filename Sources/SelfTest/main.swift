@@ -342,6 +342,103 @@ do {
     expect(composite != nil && composite!.width == model.baseImage.width, "composite ok")
 }
 
+
+// MARK: - FrameAnimator spring math
+
+do {
+    print("FrameAnimator: spring convergence")
+    // Underdamped (0.82): must settle at target without NaN, slight overshoot ok.
+    var (s, v) = (0.0, 0.0)
+    var overshoot = 0.0
+    let (k, c) = FrameAnimator.coefficients(response: 0.42, dampingFraction: 0.82)
+    for _ in 0..<1200 {
+        (s, v) = FrameAnimator.advance(s: s, v: v, k: k, c: c, dt: 1 / 120)
+        overshoot = max(overshoot, s)
+    }
+    expect(s.isFinite && v.isFinite, "no NaN over 10s of steps")
+    expect(abs(s - 1) < 0.005 && abs(v) < 0.005, "settles (s=\(s), v=\(v))")
+    expect(overshoot < 1.15 && overshoot > 0.99, "plausible trajectory (peak=\(overshoot))")
+
+    // Critically damped (1.0): no overshoot.
+    var (sc, vc) = (0.0, 0.0)
+    let (kc, cc) = FrameAnimator.coefficients(response: 0.32, dampingFraction: 1.0)
+    var peak = 0.0
+    for _ in 0..<1200 {
+        (sc, vc) = FrameAnimator.advance(s: sc, v: vc, k: kc, c: cc, dt: 1 / 120)
+        peak = max(peak, sc)
+    }
+    expect(abs(sc - 1) < 0.005, "critical settles (s=\(sc))")
+    expect(peak <= 1.0001, "critical never overshoots (peak=\(peak))")
+
+    // Large-dt stability (tab-throttle style 1/30 steps).
+    var (st, vt) = (0.0, 0.0)
+    for _ in 0..<600 { (st, vt) = FrameAnimator.advance(s: st, v: vt, k: k, c: c, dt: 1 / 30) }
+    expect(abs(st - 1) < 0.01 && st.isFinite, "stable at 30Hz steps (s=\(st))")
+}
+
+// MARK: - Thumbnail downsampling
+
+do {
+    print("ThumbnailCache: ImageIO downsample")
+    let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+    let ctx = CGContext(
+        data: nil, width: 3000, height: 2000,
+        bitsPerComponent: 8, bytesPerRow: 3000 * 4,
+        space: srgb,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    ctx.setFillColor(CGColor(srgbRed: 0.3, green: 0.7, blue: 0.2, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: 3000, height: 2000))
+    let big = ctx.makeImage()!
+    let dest = CGImageDestinationCreateWithURL(
+        URL(fileURLWithPath: "/tmp/ci-selftest-big.png") as CFURL,
+        "public.png" as CFString, 1, nil
+    )!
+    CGImageDestinationAddImage(dest, big, nil)
+    CGImageDestinationFinalize(dest)
+
+    if let thumb = ThumbnailCache.downsampled(path: "/tmp/ci-selftest-big.png", maxPixel: 136) {
+        let pixels = max(thumb.size.width, thumb.size.height)
+        expect(pixels <= 136 && pixels >= 120, "thumbnail bounded (\(thumb.size))")
+    } else {
+        expect(false, "thumbnail decoded")
+    }
+    try? FileManager.default.removeItem(atPath: "/tmp/ci-selftest-big.png")
+}
+
+// MARK: - Pasteboard image flavors
+
+do {
+    print("AutoPaster: PNG+TIFF flavors")
+    let pb = NSPasteboard(name: NSPasteboard.Name("selftest-flavors-\(UUID().uuidString)"))
+    pb.clearContents()
+    AutoPaster.writeImageFlavors(pb, pngData: pngData(.systemGreen))
+    expect(pb.data(forType: .png) != nil, "png flavor present")
+    expect(pb.data(forType: .tiff) != nil, "tiff flavor present")
+}
+
+// MARK: - Menu-bar band math
+
+do {
+    print("MenuBarHoverMonitor: band")
+    // Regular 14" MBP logical geometry: menu bar 38pt tall.
+    let band = MenuBarHoverMonitor.band(
+        screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        visibleFrame: CGRect(x: 0, y: 38, width: 1512, height: 944),
+        statusBarThickness: 24, topInset: 38
+    )
+    expect(band.height == 38, "band uses visible-frame delta (\(band.height))")
+    expect(band.maxY == 982, "band pinned to screen top")
+
+    // Auto-hiding menu bar: visible frame reaches the top -> fallback.
+    let fallback = MenuBarHoverMonitor.band(
+        screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        statusBarThickness: 24, topInset: 32
+    )
+    expect(fallback.height == 32, "fallback uses top inset (\(fallback.height))")
+}
+
 print("")
 if failures == 0 {
     print("ALL \(total) checks passed")

@@ -24,6 +24,10 @@ public final class ClipboardMonitor {
     private var timer: Timer?
     private let pasteboard = NSPasteboard.general
     private var lastChangeCount: Int
+    private var lastChangeDate = Date()
+    /// Poll cadence: snappy while the user is working, backed off when the
+    /// pasteboard has been quiet, restored the moment anything changes.
+    private var currentInterval: TimeInterval = 0.35
 
     public init() {
         lastChangeCount = pasteboard.changeCount
@@ -33,8 +37,16 @@ public final class ClipboardMonitor {
         stop()
         paused = false
         lastChangeCount = pasteboard.changeCount
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            self?.poll()
+        lastChangeDate = Date()
+        currentInterval = interval
+        scheduleTimer()
+    }
+
+    private func scheduleTimer() {
+        let timer = Timer(timeInterval: currentInterval, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.poll()
+            self.scheduleTimer()
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -54,8 +66,20 @@ public final class ClipboardMonitor {
     private func poll() {
         guard !paused else { return }
         let count = pasteboard.changeCount
-        guard count != lastChangeCount else { return }
+        guard count != lastChangeCount else {
+            // Quiet pasteboard: back off to a low cadence.
+            if -lastChangeDate.timeIntervalSinceNow > 120, currentInterval < 1 {
+                currentInterval = 1.2
+            }
+            return
+        }
         lastChangeCount = count
+        lastChangeDate = Date()
+        if currentInterval > 0.35 {
+            currentInterval = 0.35
+            timer?.invalidate()
+            scheduleTimer()
+        }
         guard var clip = Self.capture(from: pasteboard) else { return }
         let front = NSWorkspace.shared.frontmostApplication
         clip.sourceBundle = front?.bundleIdentifier

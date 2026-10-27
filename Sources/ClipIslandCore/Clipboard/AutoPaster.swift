@@ -79,13 +79,18 @@ public final class AutoPaster {
                 pb.writeObjects(urls)
             }
         case .image:
-            guard let path = item.imagePath else { return }
-            if let data = FileManager.default.contents(atPath: path) {
-                pb.setData(data, forType: .png)
-            }
-            if let image = NSImage(contentsOfFile: path) {
-                pb.writeObjects([image])
-            }
+            guard let path = item.imagePath,
+                  let data = FileManager.default.contents(atPath: path) else { return }
+            Self.writeImageFlavors(pb, pngData: data)
+        }
+    }
+
+    /// PNG + TIFF together: some apps (notably Electron-based) refuse plain
+    /// TIFF-only or PNG-only image pasteboards.
+    public static func writeImageFlavors(_ pb: NSPasteboard, pngData: Data) {
+        pb.setData(pngData, forType: .png)
+        if let rep = NSBitmapImageRep(data: pngData), let tiff = rep.tiffRepresentation {
+            pb.setData(tiff, forType: .tiff)
         }
     }
 }

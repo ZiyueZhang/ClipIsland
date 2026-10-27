@@ -1,9 +1,11 @@
 #!/bin/bash
 # Build ClipIsland.app without Xcode: SwiftPM release build + bundle assembly + adhoc codesign.
+# Usage: build-app.sh [configuration] [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${1:-release}"
+VERSION="${2:-1.1.0}"
 swift build -c "$CONFIG"
 
 BIN=".build/$CONFIG/ClipIsland"
@@ -20,8 +22,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>ClipIsland</string>
     <key>CFBundleDisplayName</key><string>ClipIsland</string>
     <key>CFBundleIdentifier</key><string>com.clipisland.app</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>__VERSION__</string>
+    <key>CFBundleShortVersionString</key><string>__VERSION__</string>
     <key>CFBundleExecutable</key><string>ClipIsland</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -33,6 +35,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+sed -i '' "s/__VERSION__/$VERSION/g" "$APP/Contents/Info.plist"
+
 codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "warning: codesign failed, app is unsigned"
 
-echo "Built $APP"
+echo "Built $APP (v$VERSION)"

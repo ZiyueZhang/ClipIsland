@@ -352,9 +352,6 @@ private struct ResultList: View {
                 }
                 .padding(.vertical, 2)
             }
-            .overlay(alignment: .trailing) {
-                ScrollViewIndicator(model: model)
-            }
             .onChange(of: model.selectedIndex) { _, newValue in
                 guard model.results.indices.contains(newValue) else { return }
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -366,11 +363,15 @@ private struct ResultList: View {
 }
 
 /// Async thumbnail loading with NSCache storage; `version` bumps so views
-/// observing the cache re-render when a load completes. (No @State: the CLT
-/// toolchain cannot expand SwiftUI macros.)
+/// observing the cache re-render when a load completes. Thumbnails are
+/// decoded at thumbnail size via ImageIO — a 3000×2000 screenshot costs
+/// ~74KB of resident bitmap instead of ~24MB of full-resolution decode.
 @Observable
-final class ThumbnailCache {
+public final class ThumbnailCache {
     static let shared = ThumbnailCache()
+
+    /// List thumbs render at 34pt; 136px covers 34pt @4x with headroom.
+    static let maxPixel: Int = 136
 
     private let store = NSCache<NSString, NSImage>()
     private var inflight: Set<String> = []
@@ -381,32 +382,34 @@ final class ThumbnailCache {
         if let hit = store.object(forKey: path as NSString) { return hit }
         guard !inflight.contains(path) else { return nil }
         inflight.insert(path)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let image = item.loadImage()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let image = Self.downsampled(path: path, maxPixel: Self.maxPixel)
             DispatchQueue.main.async {
                 if let image {
-                    self.store.setObject(image, forKey: path as NSString)
+                    self?.store.setObject(image, forKey: path as NSString)
                 }
-                self.inflight.remove(path)
-                self.version += 1
+                self?.inflight.remove(path)
+                self?.version += 1
             }
         }
         return nil
     }
-}
 
-private struct ScrollViewIndicator: View {
-    let model: NotchModel
-
-    var body: some View {
-        VStack {
-            ForEach(0..<max(model.results.count, 1), id: \.self) { i in
-                Capsule()
-                    .fill(i == model.selectedIndex ? Color.accentColor : Color.secondary.opacity(0.2))
-                    .frame(width: 3, height: 5)
-            }
+    /// Decodes a downscaled thumbnail straight off the decoder — never
+    /// materializes the full-resolution bitmap.
+    public static func downsampled(path: String, maxPixel: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else {
+            return nil
         }
-        .padding(.trailing, 4)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 }
 
