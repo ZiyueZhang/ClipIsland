@@ -38,6 +38,8 @@ public struct ClipItem: Identifiable, Equatable {
     public var createdAt: Date
     public var pinned: Bool
     public let contentHash: String
+    /// True while the vault is locked: content exists but is unreadable.
+    public var redacted: Bool = false
 
     public init(
         id: Int64,
@@ -49,7 +51,8 @@ public struct ClipItem: Identifiable, Equatable {
         sourceName: String? = nil,
         createdAt: Date = Date(),
         pinned: Bool = false,
-        contentHash: String = ""
+        contentHash: String = "",
+        redacted: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -61,9 +64,11 @@ public struct ClipItem: Identifiable, Equatable {
         self.createdAt = createdAt
         self.pinned = pinned
         self.contentHash = contentHash
+        self.redacted = redacted
     }
 
     public var displayText: String {
+        if redacted { return "🔒 已加密（解锁后可见）" }
         switch kind {
         case .image:
             if let size = imageSize {

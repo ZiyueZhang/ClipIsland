@@ -33,6 +33,7 @@ public final class AppCoordinator: NSObject {
     private var ocrWindow: OCRResultWindowController?
     private let hoverMonitor = MenuBarHoverMonitor()
     private let postCaptureBar = PostCaptureBar()
+    private let vault = Vault.shared
 
     public override init() {
         super.init()
@@ -74,14 +75,22 @@ public final class AppCoordinator: NSObject {
         hotkeys.onScreenshotHotkey = { [weak self] in
             self?.startScreenshot()
         }
+        hotkeys.onWindowCaptureHotkey = { [weak self] in
+            self?.startWindowScreenshot()
+        }
         if ProcessInfo.processInfo.environment["CLIPISLAND_NO_HOTKEY"] != "1" {
-            hotkeys.start(panelCombo: settings.panelHotkey, screenshotCombo: settings.screenshotHotkey)
+            hotkeys.start(
+                panelCombo: settings.panelHotkey,
+                screenshotCombo: settings.screenshotHotkey,
+                windowCombo: settings.windowCaptureHotkey
+            )
         } else {
             log("hotkeys disabled via env")
         }
 
         notchWindow = NotchWindowController(model: notchModel)
         wireHoverMonitor()
+        wireVault()
         wireSettingsWindow()
         buildStatusBarMenu()
         installTestHook()
@@ -96,6 +105,71 @@ public final class AppCoordinator: NSObject {
 
     /// The island can be summoned by resting the pointer anywhere in the
     /// menu bar (tendedero-style), not just on the 220pt notch itself.
+    /// Vault state ↔ UI: lock screen in the panel, decryption routing for
+    /// thumbnails/paste/drag/QL/editor, auto-lock on inactivity.
+    private func wireVault() {
+        syncVaultState()
+        vault.onChange = { [weak self] in
+            self?.syncVaultState()
+            self?.notchModel.reloadResults()
+            self?.refreshStatusMenu()
+        }
+        vault.onAutoLock = { [weak self] in
+            self?.notchModel.collapse()
+        }
+
+        paster?.imageLoader = { [weak self] item in
+            self?.store?.decryptedImageData(for: item)
+        }
+        ThumbnailCache.storeLoader = { [weak self] item in
+            self?.store?.downsampledThumbnail(for: item, maxPixel: ThumbnailCache.maxPixel)
+        }
+        notchModel.dragProvider = { [weak self] item -> NSItemProvider? in
+            guard let self, item.kind == .image, let data = self.store?.decryptedImageData(for: item) else {
+                return nil
+            }
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("clipisland-drag-\(item.id).png")
+            do {
+                try data.write(to: url, options: .atomic)
+                return NSItemProvider(object: url as NSURL)
+            } catch {
+                log("drag decrypt failed: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        notchModel.onVaultUnlockPassword = { [weak self] password in
+            guard let self else { return }
+            do {
+                try vault.unlock(password: password)
+                store?.flushPendingCaptures()
+                notchModel.vaultUnlockError = nil
+            } catch VaultError.wrongPassword {
+                notchModel.vaultUnlockError = "密码错误"
+            } catch {
+                notchModel.vaultUnlockError = "\(error)"
+            }
+        }
+        notchModel.onVaultUnlockTouchID = { [weak self] in
+            guard let self else { return }
+            do {
+                try vault.unlockTouchID()
+                store?.flushPendingCaptures()
+                notchModel.vaultUnlockError = nil
+            } catch {
+                notchModel.vaultUnlockError = "触控 ID 失败：\(error)"
+            }
+        }
+    }
+
+    private func syncVaultState() {
+        notchModel.vaultLocked = vault.isEnabled && !vault.isUnlocked
+        notchModel.vaultTouchIDEnabled = vault.metadata?.touchIDEnabled ?? false
+        notchModel.vaultTouchIDAvailable = Vault.isTouchIDAvailable
+        notchModel.vaultPendingCount = store?.pendingCaptureCount ?? 0
+        if notchModel.vaultLocked { notchModel.expandOnHoverGateForLock() }
+    }
+
     private func wireHoverMonitor() {
         hoverMonitor.onDwell = { [weak self] in
             guard let self else { return }
@@ -103,7 +177,9 @@ public final class AppCoordinator: NSObject {
         }
         hoverMonitor.start { [weak self] in
             guard let self else { return false }
-            return self.notchModel.phase == .collapsed && self.notchModel.expandOnHover
+            return self.notchModel.phase == .collapsed
+                && self.notchModel.expandOnHover
+                && !self.notchModel.vaultLocked
         }
     }
 
@@ -112,11 +188,25 @@ public final class AppCoordinator: NSObject {
         controller.onChangeCapacity = { [weak self] capacity in
             self?.store?.capacity = capacity
         }
+        controller.onChangeVaultEnabled = { [weak self] enabled in
+            guard let self else { return }
+            self.store?.migrateAll(enabled: enabled)
+            self.syncVaultState()
+            self.notchModel.reloadResults()
+            self.refreshStatusMenu()
+        }
+        controller.onChangeVaultUnlocked = { [weak self] in
+            guard let self else { return }
+            self.store?.flushPendingCaptures()
+            self.syncVaultState()
+            self.notchModel.reloadResults()
+        }
         controller.onChangeHotkeys = { [weak self] in
             guard let self else { return }
             self.hotkeys.reregister(
                 panelCombo: self.settings.panelHotkey,
-                screenshotCombo: self.settings.screenshotHotkey
+                screenshotCombo: self.settings.screenshotHotkey,
+                windowCombo: self.settings.windowCaptureHotkey
             )
         }
         controller.onclose = { [weak self, weak controller] in
@@ -292,6 +382,7 @@ public final class AppCoordinator: NSObject {
     private func wirePanelActions() {
         notchModel.onWillExpand = { [weak self] in
             self?.paster?.noteFrontmost()
+            self?.vault.noteActivity()
             self?.notchModel.showAccessibilityHint =
                 (self?.settings.autoPasteEnabled ?? false)
                 && !AutoPaster.isAccessibilityTrusted
@@ -331,6 +422,7 @@ public final class AppCoordinator: NSObject {
 
     private func select(_ item: ClipItem) {
         notchModel.collapse()
+        vault.noteActivity()
         paster?.paste(item)
     }
 
@@ -354,7 +446,11 @@ public final class AppCoordinator: NSObject {
 
         menu.addItem(withTitle: "展开 / 收起面板", action: #selector(togglePanel), keyEquivalent: "")
         menu.addItem(withTitle: monitor.paused ? "恢复监控" : "暂停监控", action: #selector(togglePause), keyEquivalent: "")
+        if vault.isEnabled {
+            menu.addItem(withTitle: "立即锁定", action: #selector(lockNow), keyEquivalent: "l")
+        }
         menu.addItem(withTitle: "截图（选区）", action: #selector(takeScreenshot), keyEquivalent: "")
+        menu.addItem(withTitle: "截图（窗口）", action: #selector(takeWindowScreenshot), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "清空历史", action: #selector(clearHistory), keyEquivalent: "")
         menu.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",")
@@ -381,8 +477,44 @@ public final class AppCoordinator: NSObject {
         startScreenshot()
     }
 
+    @objc private func takeWindowScreenshot() {
+        startWindowScreenshot()
+    }
+
+    private func startWindowScreenshot() {
+        guard CaptureService.requestScreenCapturePermission() else {
+            log("screen capture denied; opening System Settings")
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+            )
+            return
+        }
+        notchModel.collapse(animated: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.beginWindowSelection()
+        }
+    }
+
+    private func beginWindowSelection() {
+        notchWindow?.setIsland(hidden: true)
+        selectionController.beginWindowCapture { [weak self] completion in
+            guard let self else { return }
+            self.notchWindow?.setIsland(hidden: false)
+            switch completion.result {
+            case .region(let image), .fullscreen(let image):
+                self.deliverScreenshot(image)
+            case .cancelled:
+                log("window capture cancelled")
+            }
+        }
+    }
+
     @objc private func clearHistory() {
         store?.clear()
+    }
+
+    @objc private func lockNow() {
+        vault.lock()
     }
 
     // MARK: - Test hook
@@ -437,6 +569,23 @@ public final class AppCoordinator: NSObject {
         }()
         case "settings":
             openSettings()
+        case "lock":
+            vault.lock()
+        case "setuppw": // faithful settings flow: setup + migration
+            do {
+                try vault.setup(password: "test1234")
+                store?.migrateAll(enabled: true)
+            } catch { log("setuppw: \(error)") }
+            syncVaultState()
+        case "unlockpw":
+            do {
+                try vault.unlock(password: "test1234")
+                store?.flushPendingCaptures()
+            } catch { log("unlockpw: \(error)") }
+            syncVaultState()
+        case "vaultstate":
+            syncVaultState()
+            log("vault state=\(vault.state) pending=\(store?.pendingCaptureCount ?? -1)")
         case "popup": {
             let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
             let ctx = CGContext(
@@ -463,6 +612,8 @@ public final class AppCoordinator: NSObject {
             notchModel.handleSpecial(.digit(action.hasSuffix("3") ? 3 : 2))
         case "screenshot":
             startScreenshot()
+        case "windowcapture":
+            startWindowScreenshot()
         case "ocr": {
             // Renders "ClipIsland OCR 测试 2026" and runs OCR on it.
             let srgb = CGColorSpace(name: CGColorSpace.sRGB)!

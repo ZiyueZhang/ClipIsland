@@ -7,22 +7,25 @@ import Foundation
 public final class HotkeyManager {
     public var onPanelHotkey: (() -> Void)?
     public var onScreenshotHotkey: (() -> Void)?
+    public var onWindowCaptureHotkey: (() -> Void)?
 
     private var panelRef: EventHotKeyRef?
     private var shotRef: EventHotKeyRef?
+    private var windowRef: EventHotKeyRef?
     private var handlerInstalled = false
 
     private let panelSignature: OSType = 0x4350_4950 // "CLIP"
     private let shotSignature: OSType = 0x434C_4953 // "CLIS"
+    private let windowSignature: OSType = 0x434C_5744 // "CLWD"
 
     public init() {}
 
-    public func start(panelCombo: String, screenshotCombo: String) {
+    public func start(panelCombo: String, screenshotCombo: String, windowCombo: String? = nil) {
         installHandlerIfNeeded()
-        reregister(panelCombo: panelCombo, screenshotCombo: screenshotCombo)
+        reregister(panelCombo: panelCombo, screenshotCombo: screenshotCombo, windowCombo: windowCombo)
     }
 
-    public func reregister(panelCombo: String, screenshotCombo: String) {
+    public func reregister(panelCombo: String, screenshotCombo: String, windowCombo: String? = nil) {
         unregister()
         if let combo = Self.parse(panelCombo) {
             let id = EventHotKeyID(signature: panelSignature, id: 1)
@@ -34,11 +37,17 @@ public final class HotkeyManager {
             let status = RegisterEventHotKey(UInt32(combo.keyCode), combo.carbonFlags, id, GetApplicationEventTarget(), 0, &shotRef)
             log("screenshot hotkey \(screenshotCombo): \(status == noErr ? "ok" : "failed(\(status))")")
         }
+        if let windowCombo, let combo = Self.parse(windowCombo) {
+            let id = EventHotKeyID(signature: windowSignature, id: 3)
+            let status = RegisterEventHotKey(UInt32(combo.keyCode), combo.carbonFlags, id, GetApplicationEventTarget(), 0, &windowRef)
+            log("window capture hotkey \(windowCombo): \(status == noErr ? "ok" : "failed(\(status))")")
+        }
     }
 
     private func unregister() {
         if let panelRef { UnregisterEventHotKey(panelRef); self.panelRef = nil }
         if let shotRef { UnregisterEventHotKey(shotRef); self.shotRef = nil }
+        if let windowRef { UnregisterEventHotKey(windowRef); self.windowRef = nil }
     }
 
     private func installHandlerIfNeeded() {
@@ -79,6 +88,8 @@ public final class HotkeyManager {
             DispatchQueue.main.async { manager.onPanelHotkey?() }
         } else if id.signature == manager.shotSignature {
             DispatchQueue.main.async { manager.onScreenshotHotkey?() }
+        } else if id.signature == manager.windowSignature {
+            DispatchQueue.main.async { manager.onWindowCaptureHotkey?() }
         }
         return noErr
     }

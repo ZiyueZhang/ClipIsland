@@ -21,6 +21,57 @@ final class SelectionController {
         case cancelled
     }
 
+    // MARK: Window capture mode
+    private var windowOverlays: [WindowSelectionOverlayWindow] = []
+    private var windowCompletion: ((Completion) -> Void)?
+    private(set) var capturedWindows: [CapturableWindow] = []
+
+    /// Live overlay: highlights the window under the cursor; click captures
+    /// it occlusion-safe via its window number. No screen freeze needed —
+    /// `.optionIncludingWindow` composites the window itself.
+    public func beginWindowCapture(completion: @escaping (Completion) -> Void) {
+        guard windows.isEmpty, windowOverlays.isEmpty else { return } // already active
+        windowCompletion = completion
+        capturedWindows = WindowCaptureService.shared.listWindows()
+        guard !capturedWindows.isEmpty else {
+            completion(Completion(result: .cancelled, hoveredColor: nil))
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        for screen in NSScreen.screens {
+            let overlay = WindowSelectionOverlayWindow(screen: screen, controller: self)
+            windowOverlays.append(overlay)
+            overlay.makeKeyAndOrderFront(nil)
+        }
+        windowOverlays.first?.makeKeyAndOrderFront(nil)
+        log("window capture: \(capturedWindows.count) candidate windows")
+    }
+
+    fileprivate func windowCaptureRequested(_ window: CapturableWindow) {
+        let completion = windowCompletion
+        windowCompletion = nil
+        endWindowOverlays()
+        if let image = WindowCaptureService.shared.capture(window) {
+            completion?(Completion(result: .region(image), hoveredColor: nil))
+        } else {
+            log("window capture failed for \(window.windowNumber)")
+            completion?(Completion(result: .cancelled, hoveredColor: nil))
+        }
+    }
+
+    fileprivate func windowCaptureCancelled() {
+        let completion = windowCompletion
+        windowCompletion = nil
+        endWindowOverlays()
+        completion?(Completion(result: .cancelled, hoveredColor: nil))
+    }
+
+    private func endWindowOverlays() {
+        windowOverlays.forEach { $0.orderOut(nil) }
+        windowOverlays.removeAll()
+        capturedWindows = []
+    }
+
     private var windows: [SelectionWindow] = []
     private let service = CaptureService.shared
     private var frozen: [CaptureService.FrozenScreen] = []
@@ -363,5 +414,141 @@ final class SelectionView: NSView {
         ctx.addPath(path)
         ctx.fillPath()
         attributed.draw(at: CGPoint(x: box.minX + 6, y: box.minY + 3))
+    }
+}
+
+
+// MARK: - Window capture overlay
+
+final class WindowSelectionOverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    private let view: WindowSelectionOverlayView
+
+    init(screen: NSScreen, controller: SelectionController) {
+        view = WindowSelectionOverlayView(frame: screen.frame, screen: screen, controller: controller)
+        super.init(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        level = .screenSaver
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        acceptsMouseMovedEvents = true
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        contentView = view
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { // Esc
+            view.controller?.windowCaptureCancelled()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+/// Dimmed screen with a live highlight of the window under the cursor:
+/// 3pt accent border + app-name chip, shotx-style.
+final class WindowSelectionOverlayView: NSView {
+    fileprivate weak var controller: SelectionController?
+    private let screen: NSScreen
+    private var hovered: CapturableWindow?
+
+    /// Global AppKit height of the main display — CG↔AppKit Y conversion.
+    private static var mainDisplayHeight: CGFloat {
+        NSScreen.screens.first?.frame.maxY ?? 0
+    }
+
+    init(frame: CGRect, screen: NSScreen, controller: SelectionController) {
+        self.screen = screen
+        self.controller = controller
+        super.init(frame: frame)
+        seedInitialHover()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    private func seedInitialHover() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateHover(globalAppKit: NSEvent.mouseLocation)
+        }
+    }
+
+    private func updateHover(globalAppKit point: NSPoint) {
+        let cgPoint = WindowCaptureService.cgPoint(
+            fromAppKit: point,
+            mainDisplayHeight: Self.mainDisplayHeight
+        )
+        hovered = WindowCaptureService.topWindow(at: cgPoint, in: controller?.capturedWindows ?? [])
+        needsDisplay = true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        let global = NSPoint(x: window!.frame.minX + local.x, y: window!.frame.minY + local.y)
+        updateHover(globalAppKit: global)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let hovered else { return }
+        controller?.windowCaptureRequested(hovered)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.28).cgColor)
+        ctx.fill(bounds)
+
+        guard let hovered,
+              let controller,
+              let windowFrame = window?.frame else { return }
+        // CG window frame → global AppKit → this screen's local coords.
+        let global = WindowCaptureService.appKitRect(
+            fromCG: hovered.cgFrame,
+            mainDisplayHeight: Self.mainDisplayHeight
+        )
+        let local = CGRect(
+            x: global.minX - windowFrame.minX,
+            y: global.minY - windowFrame.minY,
+            width: global.width,
+            height: global.height
+        ).intersection(bounds)
+        guard local.width > 2, local.height > 2 else { return }
+
+        let path = NSBezierPath(roundedRect: local.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+        NSColor.controlAccentColor.setStroke()
+        path.lineWidth = 3
+        path.stroke()
+
+        // App-name chip above the window (flips below when clipped).
+        let label = hovered.title.isEmpty ? hovered.ownerName : "\(hovered.ownerName) — \(hovered.title)"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ]
+        let text = NSAttributedString(string: label, attributes: attributes)
+        let textSize = text.size()
+        var chip = CGRect(
+            x: local.minX,
+            y: local.minY - textSize.height - 12,
+            width: textSize.width + 16,
+            height: textSize.height + 8
+        )
+        if chip.minY < bounds.minY + 4 {
+            chip.origin.y = local.maxY + 4
+        }
+        chip = chip.intersection(bounds.insetBy(dx: 2, dy: 2))
+        guard chip.width > 20 else { return }
+        let chipPath = NSBezierPath(roundedRect: chip, xRadius: 4, yRadius: 4)
+        NSColor.controlAccentColor.setFill()
+        chipPath.fill()
+        text.draw(at: NSPoint(x: chip.minX + 8, y: chip.minY + 4))
     }
 }

@@ -1,7 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
 import ClipIslandCore
+import CryptoKit
 import Foundation
+import SQLite3
 
 // Plain-assertion test runner: `swift run SelfTest`. Exists because the CLT
 // toolchain's SwiftBuild intermittently fails to load the swift-testing macro
@@ -437,6 +439,133 @@ do {
         statusBarThickness: 24, topInset: 32
     )
     expect(fallback.height == 32, "fallback uses top inset (\(fallback.height))")
+}
+
+
+// MARK: - Vault crypto
+
+do {
+    print("Vault: PBKDF2 + AES-GCM")
+    // RFC 7914-style vector for PBKDF2-HMAC-SHA256: 1 iteration.
+    let key = Vault.pbkdf2(password: "password", salt: Data("salt".utf8), iterations: 1)
+    let hex = key.withUnsafeBytes { Data($0).map { String(format: "%02x", $0) }.joined() }
+    expect(hex == "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b", "PBKDF2 vector (\(hex.prefix(16))…)")
+
+    // Round trip.
+    let vaultKey = SymmetricKey(size: .bits256)
+    let secret = Data("绝密内容 classified 🤫".utf8)
+    let sealed = try AES.GCM.seal(secret, using: vaultKey).combined!
+    let opened = try AES.GCM.open(try AES.GCM.SealedBox(combined: sealed), using: vaultKey)
+    expect(opened == secret, "seal/open round trip")
+
+    // Wrong key must fail.
+    let wrong = SymmetricKey(size: .bits256)
+    expect((try? AES.GCM.open(try AES.GCM.SealedBox(combined: sealed), using: wrong)) == nil, "wrong key rejected")
+
+    // Sealed bytes never look like a PNG; plain PNG bytes never look sealed.
+    expect(ClipStore.isSealedData(sealed), "sealed bytes flagged")
+    let pngMagic = Data([0x89, 0x50, 0x4E, 0x47]) + Data(repeating: 0, count: 16)
+    expect(!ClipStore.isSealedData(pngMagic), "png magic not flagged")
+}
+
+do {
+    print("Vault: lifecycle (isolated defaults)")
+    let suite = UserDefaults(suiteName: "selftest-vault-\(UUID().uuidString)")!
+    let vault = Vault(defaults: suite)
+
+    expect(vault.state == .plaintext, "starts plaintext")
+    expect(!vault.isEnabled, "not enabled")
+
+    // Setup + at-rest formats.
+    try vault.setup(password: "test1234")
+    expect(vault.isUnlocked && vault.isEnabled, "setup unlocks")
+    let sealedText = VaultCoding.encodeText("hello vault", vault: vault)
+    expect(sealedText?.hasPrefix("enc:v1:") == true, "text encoded with prefix")
+    expect(sealedText?.contains("hello vault") == false, "plaintext absent at rest")
+    expect(VaultCoding.decodeText(sealedText!, vault: vault) == "hello vault", "decode round trip")
+
+    // Lock / unlock / wrong password.
+    vault.lock()
+    expect(vault.state == .locked, "locked")
+    expect(VaultCoding.decodeText(sealedText!, vault: vault) == nil, "decode unavailable while locked")
+    expect((try? vault.seal(Data([1]))) == nil, "seal unavailable while locked")
+    var wrongFailed = false
+    do { try vault.unlock(password: "wrong") } catch VaultError.wrongPassword { wrongFailed = true } catch { wrongFailed = false }
+    expect(wrongFailed, "wrong password rejected")
+    try vault.unlock(password: "test1234")
+    expect(vault.isUnlocked, "correct password unlocks")
+
+    // Keyed dedup hash: deterministic, differs from plain SHA256.
+    let material = Data("dedup-probe".utf8)
+    let h1 = vault.keyedHash(material)
+    let h2 = vault.keyedHash(material)
+    expect(h1 == h2 && h1 != nil, "keyed hash deterministic")
+    expect(h1 != SHA256.hash(data: material).map { String(format: "%02x", $0) }.joined(), "keyed hash differs from plain sha256")
+
+    // Remove.
+    try vault.removePassword(current: "test1234")
+    expect(vault.state == .plaintext, "removed -> plaintext")
+    expect(VaultCoding.encodeText("x", vault: vault) == nil, "encoding off after removal")
+}
+
+// MARK: - ClipStore + vault integration
+
+do {
+    print("ClipStore: encrypted at rest")
+    let suite = UserDefaults(suiteName: "selftest-vault-store-\(UUID().uuidString)")!
+    let vault = Vault(defaults: suite)
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("clipisland-vault-\(UUID().uuidString)")
+    let store = try ClipStore(directory: dir, vault: vault)
+    store.capacity = 50
+
+    // Plaintext mode baseline.
+    store.add(NewClip(kind: .text, text: "plain-mode text"))
+    expect(store.all.first?.text == "plain-mode text", "plaintext mode readable")
+
+    // Enable vault: migration seals existing rows.
+    try vault.setup(password: "test1234")
+    store.migrateAll(enabled: true)
+    expect(store.all.first?.text == "plain-mode text", "still readable after migration (unlocked)")
+
+    // DB raw check: ciphertext + no plaintext.
+    guard let raw = try? SQLiteDatabase(path: dir.appendingPathComponent("clips.sqlite3").path) else {
+        let probe = try? SQLiteDatabase(path: dir.appendingPathComponent("clips.sqlite3").path)
+        expect(false, "raw db open failed: \(String(describing: probe))")
+        failures += 1
+        print("\(failures)/\(total) checks FAILED (abort)")
+        exit(1)
+    }
+    let rawText = try raw.query("SELECT text FROM clips LIMIT 1", []) { String(cString: sqlite3_column_text($0, 0)) }
+    expect(rawText.first?.hasPrefix("enc:v1:") == true, "DB text is sealed (\(rawText.first?.prefix(12) ?? "nil")…)")
+    expect(rawText.first?.contains("plain-mode") == false, "plaintext absent in DB")
+
+    // New adds are sealed too.
+    store.add(NewClip(kind: .text, text: "second-secret-文本"))
+    let raw2 = try raw.query("SELECT COUNT(*) FROM clips WHERE text LIKE '%second-secret%'", []) { sqlite3_column_int($0, 0) }
+    expect(Int(raw2.first ?? 1) == 0, "new text not in DB plaintext")
+
+    // Lock: content redacted, search blind.
+    vault.lock()
+    let reloaded = try ClipStore(directory: dir, vault: vault)
+    expect(reloaded.all.first?.redacted == true, "locked reload redacts")
+    expect(reloaded.all.first?.displayText.contains("🔒") == true, "redacted display text")
+    expect(reloaded.search(query: "second-secret").isEmpty, "search blind while locked")
+
+    // Capture while locked: buffered in RAM, never on disk.
+    let dbBefore = try raw.query("SELECT COUNT(*) FROM clips", []) { Int(sqlite3_column_int($0, 0)) }.first ?? -1
+    reloaded.add(NewClip(kind: .text, text: "locked-period capture"))
+    expect(reloaded.pendingCaptureCount == 1, "pending buffer holds capture")
+    let dbAfter = try raw.query("SELECT COUNT(*) FROM clips", []) { Int(sqlite3_column_int($0, 0)) }.first ?? -1
+    expect(dbAfter == dbBefore, "nothing written to disk while locked")
+
+    // Unlock: flush merges buffered capture, now sealed.
+    try vault.unlock(password: "test1234")
+    reloaded.flushPendingCaptures()
+    expect(reloaded.pendingCaptureCount == 0, "pending flushed")
+    expect(reloaded.all.contains { $0.text == "locked-period capture" }, "buffered capture stored")
+    let rawSealed = try raw.query("SELECT COUNT(*) FROM clips WHERE text LIKE 'enc:%'", []) { Int(sqlite3_column_int($0, 0)) }
+    expect((rawSealed.first ?? 0) >= 2, "buffered capture sealed at rest (\(rawSealed.first ?? -1))")
 }
 
 print("")

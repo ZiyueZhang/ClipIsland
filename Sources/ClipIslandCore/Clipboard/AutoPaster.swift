@@ -8,6 +8,9 @@ import Foundation
 public final class AutoPaster {
     private let monitor: ClipboardMonitor
     private var lastApp: NSRunningApplication?
+    /// Set by the coordinator so image reads go through the vault
+    /// (decrypt-at-use instead of raw file reads).
+    public var imageLoader: ((ClipItem) -> Data?)?
 
     public init(monitor: ClipboardMonitor) {
         self.monitor = monitor
@@ -79,8 +82,7 @@ public final class AutoPaster {
                 pb.writeObjects(urls)
             }
         case .image:
-            guard let path = item.imagePath,
-                  let data = FileManager.default.contents(atPath: path) else { return }
+            guard let data = imageLoader?(item) ?? item.imagePath.flatMap({ FileManager.default.contents(atPath: $0) }) else { return }
             Self.writeImageFlavors(pb, pngData: data)
         }
     }

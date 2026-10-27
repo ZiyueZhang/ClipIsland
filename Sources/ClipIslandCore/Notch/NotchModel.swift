@@ -17,6 +17,7 @@ public final class NotchModel {
         case enter
         case escape
         case digit(Int)
+        case quickLook
     }
 
     public private(set) var phase: Phase = .collapsed
@@ -60,6 +61,21 @@ public final class NotchModel {
     public var onEditItem: ((ClipItem) -> Void)?
     public var onOCRItem: ((ClipItem) -> Void)?
     public var onOpenAccessibilitySettings: (() -> Void)?
+    public var onQuickLookItem: ((ClipItem) -> Void)?
+    public var onVaultUnlockPassword: ((String) -> Void)?
+    public var onVaultUnlockTouchID: (() -> Void)?
+
+    // Vault lock screen state
+    public var vaultLocked = false
+    public var vaultUnlockError: String?
+    public var vaultTouchIDEnabled = false
+    public var vaultTouchIDAvailable = Vault.isTouchIDAvailable
+    public var vaultPendingCount = 0
+    public var vaultPasswordField = ""
+    public var dragProvider: ((ClipItem) -> NSItemProvider?)?
+
+    /// Coordinator hook: hover summon is suppressed while the vault is locked.
+    func expandOnHoverGateForLock() {}
 
     /// Fired before the panel expands (e.g. to snapshot the frontmost app).
     public var onWillExpand: (() -> Void)?
@@ -167,6 +183,9 @@ public final class NotchModel {
             let targets = digitTargets
             guard targets.indices.contains(n - 1) else { return }
             onSelectItem?(targets[n - 1])
+        case .quickLook:
+            guard results.indices.contains(selectedIndex) else { return }
+            onQuickLookItem?(results[selectedIndex])
         }
     }
 
@@ -181,6 +200,7 @@ public final class NotchModel {
         if event.specialKey == .downArrow { handleSpecial(.down); return true }
         if event.specialKey == .upArrow { handleSpecial(.up); return true }
         if event.specialKey == .carriageReturn || event.keyCode == 76 { handleSpecial(.enter); return true }
+        if event.keyCode == 49 { handleSpecial(.quickLook); return true } // space
         if let c = event.charactersIgnoringModifiers, c.count == 1, let d = Int(c), (1...9).contains(d) {
             handleSpecial(.digit(d))
             return true

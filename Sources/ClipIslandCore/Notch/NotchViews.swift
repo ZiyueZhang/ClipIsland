@@ -139,7 +139,11 @@ struct ExpandedPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             Color.black.frame(height: info.headerHeight)
-            PanelContent(model: model)
+            if model.vaultLocked {
+                LockScreenView(model: model)
+            } else {
+                PanelContent(model: model)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -223,6 +227,10 @@ final class PanelSearchField: NSTextField {
            let c = event.charactersIgnoringModifiers, c.count == 1,
            let d = Int(c), (1...9).contains(d) {
             onSpecialKey?(.digit(d))
+            return
+        }
+        if plain, stringValue.isEmpty, event.keyCode == 49 {
+            onSpecialKey?(.quickLook) // space previews the selection
             return
         }
         super.keyDown(with: event)
@@ -348,6 +356,7 @@ private struct ResultList: View {
                         )
                         .id(item.id)
                         .onTapGesture { model.onSelectItem?(item) }
+                        .onDrag { model.dragProvider?(item) ?? ClipRow.dragProvider(for: item) }
                     }
                 }
                 .padding(.vertical, 2)
@@ -377,13 +386,17 @@ public final class ThumbnailCache {
     private var inflight: Set<String> = []
     private(set) var version = 0
 
+    /// Set by the coordinator to route decodes through the vault
+    /// (decrypt-to-thumbnail without materializing the full bitmap).
+    public static var storeLoader: ((ClipItem) -> NSImage?)?
+
     func thumbnail(for item: ClipItem) -> NSImage? {
         guard let path = item.imagePath else { return nil }
         if let hit = store.object(forKey: path as NSString) { return hit }
         guard !inflight.contains(path) else { return nil }
         inflight.insert(path)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let image = Self.downsampled(path: path, maxPixel: Self.maxPixel)
+            let image = Self.storeLoader?(item) ?? Self.downsampled(path: path, maxPixel: Self.maxPixel)
             DispatchQueue.main.async {
                 if let image {
                     self?.store.setObject(image, forKey: path as NSString)
@@ -504,6 +517,23 @@ struct ClipRow: View {
         .onHover { onHover($0) }
     }
 
+    /// Drag payload: images/files drag their file URL (vault-decrypted temp
+    /// via the coordinator when sealed), text/link drag their string.
+    static func dragProvider(for item: ClipItem) -> NSItemProvider {
+        switch item.kind {
+        case .image:
+            if let path = item.imagePath, !item.redacted {
+                return NSItemProvider(object: URL(fileURLWithPath: path) as NSURL)
+            }
+            return NSItemProvider()
+        case .file:
+            let first = (item.text ?? "").split(separator: "\n").first.map(String.init) ?? ""
+            return NSItemProvider(object: URL(fileURLWithPath: first) as NSURL)
+        case .text, .link:
+            return NSItemProvider(object: (item.redacted ? "" : item.text ?? "") as NSString)
+        }
+    }
+
     private func rowButton(symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
@@ -560,6 +590,7 @@ private struct FooterBar: View {
             hint("↑↓", "选择")
             hint("⏎", "粘贴")
             hint("1-9", "直选")
+            hint("空格", "预览")
             hint("Esc", "收起")
             Spacer()
             Text(model.paused ? "监控已暂停" : "监控中 · \(model.clipCount) 条")
@@ -606,6 +637,66 @@ private struct AccessibilityHint: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.2)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Lock screen
+
+private struct LockScreenView: View {
+    let model: NotchModel
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("剪贴板历史已加密")
+                .font(.system(size: 13, weight: .semibold))
+            if model.vaultPendingCount > 0 {
+                Text("锁定期间已缓冲 \(model.vaultPendingCount) 条新捕获，解锁后入列")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+            }
+            HStack(spacing: 8) {
+                SecureField(
+                    "主密码",
+                    text: Binding(
+                        get: { model.vaultPasswordField },
+                        set: { model.vaultPasswordField = $0 }
+                    ),
+                    onCommit: { submit() }
+                )
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+                Button("解锁") { submit() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.vaultPasswordField.isEmpty)
+            }
+            if let error = model.vaultUnlockError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+            }
+            if model.vaultTouchIDEnabled && model.vaultTouchIDAvailable {
+                Button {
+                    model.onVaultUnlockTouchID?()
+                } label: {
+                    Label("用触控 ID 解锁", systemImage: "touchid")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
+    }
+
+    private func submit() {
+        guard !model.vaultPasswordField.isEmpty else { return }
+        model.onVaultUnlockPassword?(model.vaultPasswordField)
+        model.vaultPasswordField = ""
     }
 }
 

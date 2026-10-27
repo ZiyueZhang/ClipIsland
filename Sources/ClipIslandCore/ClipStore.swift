@@ -14,10 +14,10 @@ enum SQLiteError: Error {
 }
 
 /// Minimal wrapper over the sqlite3 C API: enough for the clips table.
-final class SQLiteDatabase {
+public final class SQLiteDatabase {
     private var handle: OpaquePointer?
 
-    init(path: String) throws {
+    public init(path: String) throws {
         var db: OpaquePointer?
         let rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
         guard rc == SQLITE_OK, let db else {
@@ -31,7 +31,7 @@ final class SQLiteDatabase {
         if let handle { sqlite3_close(handle) }
     }
 
-    func exec(_ sql: String) throws {
+    public func exec(_ sql: String) throws {
         var err: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(handle, sql, nil, nil, &err)
         guard rc == SQLITE_OK else {
@@ -41,7 +41,7 @@ final class SQLiteDatabase {
         }
     }
 
-    func run(_ sql: String, _ params: [SQLiteValue] = []) throws {
+    public func run(_ sql: String, _ params: [SQLiteValue] = []) throws {
         let stmt = try prepare(sql, params)
         defer { sqlite3_finalize(stmt) }
         let rc = sqlite3_step(stmt)
@@ -50,7 +50,7 @@ final class SQLiteDatabase {
         }
     }
 
-    func query<T>(_ sql: String, _ params: [SQLiteValue] = [], map: (OpaquePointer) -> T) throws -> [T] {
+    public func query<T>(_ sql: String, _ params: [SQLiteValue] = [], map: (OpaquePointer) -> T) throws -> [T] {
         let stmt = try prepare(sql, params)
         defer { sqlite3_finalize(stmt) }
         var rows: [T] = []
@@ -77,12 +77,12 @@ final class SQLiteDatabase {
         return stmt
     }
 
-    var lastInsertRowID: Int64 {
+    public var lastInsertRowID: Int64 {
         sqlite3_last_insert_rowid(handle)
     }
 }
 
-enum SQLiteValue {
+public enum SQLiteValue {
     case null
     case int(Int)
     case double(Double)
@@ -90,19 +90,28 @@ enum SQLiteValue {
 }
 
 /// Clipboard history store: in-memory list of clips, persisted to SQLite;
-/// images live as PNG files next to the database.
+/// images live as PNG files next to the database. When the vault is enabled,
+/// text payloads and image files are sealed (AES-GCM) at rest, dedup hashes
+/// become keyed HMACs, and captures made while locked are buffered in RAM
+/// until unlock — nothing sensitive is written while the key is unavailable.
 ///
 /// Main-thread only.
 public final class ClipStore {
     public let directory: URL
     public var capacity: Int = SettingsStore.shared.capacity
     public var onDidChange: (() -> Void)?
+    public let vault: Vault
 
     private var db: SQLiteDatabase
     private(set) var items: [ClipItem] = [] // pinned first, then newest first
     private var hashToIndex: [String: Int] = [:]
+    /// Captures taken while the vault was locked; flushed on unlock.
+    private var pendingLocked: [NewClip] = []
 
-    public init(directory: URL) throws {
+    public var pendingCaptureCount: Int { pendingLocked.count }
+
+    public init(directory: URL, vault: Vault = .shared) throws {
+        self.vault = vault
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let images = directory.appendingPathComponent("images", isDirectory: true)
@@ -136,7 +145,7 @@ public final class ClipStore {
             guard kind == nil || item.kind == kind else { return false }
             guard !q.isEmpty else { return true }
             let haystacks: [String] = [
-                item.text ?? "",
+                item.redacted ? "" : (item.text ?? ""),
                 item.sourceName ?? "",
                 item.kind.label,
             ]
@@ -148,7 +157,14 @@ public final class ClipStore {
     /// the top instead of duplicating. Returns the stored item.
     @discardableResult
     public func add(_ clip: NewClip, now: Date = Date()) -> ClipItem? {
-        let hash = Self.contentHash(clip)
+        // Vault locked: never touch disk with an unavailable key. Buffer in
+        // RAM; flushed through this method again on unlock.
+        if vault.isEnabled, vault.state == .locked {
+            pendingLocked.append(clip)
+            onDidChange?()
+            return nil
+        }
+        let hash = Self.contentHash(clip, vault: vault)
         if let idx = hashToIndex[hash] {
             var item = items[idx]
             item.createdAt = now
@@ -165,7 +181,8 @@ public final class ClipStore {
             let name = UUID().uuidString + ".png"
             let url = directory.appendingPathComponent("images").appendingPathComponent(name)
             do {
-                try data.write(to: url, options: .atomic)
+                let atRest = vault.isEnabled ? try vault.seal(data) : data
+                try atRest.write(to: url, options: .atomic)
                 imagePath = url.path
                 if let rep = NSBitmapImageRep(data: data) {
                     imageSize = CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
@@ -176,6 +193,12 @@ public final class ClipStore {
             }
         }
 
+        let storedText: String?
+        if vault.isEnabled, let text = clip.text {
+            storedText = VaultCoding.encodeText(text, vault: vault)
+        } else {
+            storedText = clip.text
+        }
         try? db.run(
             """
             INSERT INTO clips(kind, text, image_path, image_w, image_h, source_bundle, source_name, created_at, pinned, content_hash)
@@ -183,7 +206,7 @@ public final class ClipStore {
             """,
             [
                 .text(clip.kind.rawValue),
-                clip.text.map { .text($0) } ?? .null,
+                storedText.map { .text($0) } ?? .null,
                 imagePath.map { .text($0) } ?? .null,
                 imageSize.map { .double($0.width) } ?? .null,
                 imageSize.map { .double($0.height) } ?? .null,
@@ -241,6 +264,120 @@ public final class ClipStore {
         onDidChange?()
     }
 
+    // MARK: - Vault surface
+
+    /// True when the file holds vault-sealed bytes (not a plain PNG).
+    public func isSealedFile(_ path: String) -> Bool {
+        guard let bytes = FileManager.default.contents(atPath: path) else { return false }
+        return Self.isSealedData(bytes)
+    }
+
+    /// Pure byte-sniffing: vault output starts with the GCM nonce, never with
+    /// the PNG magic. Unit tested.
+    public static func isSealedData(_ bytes: Data) -> Bool {
+        guard bytes.count > 8 else { return false }
+        let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
+        return !Array(bytes.prefix(4)).elementsEqual(pngMagic)
+    }
+
+    /// Decrypted image bytes for a stored item (pasteboard, editor, Quick Look).
+    public func decryptedImageData(for item: ClipItem) -> Data? {
+        guard let path = item.imagePath, let raw = FileManager.default.contents(atPath: path) else {
+            return nil
+        }
+        guard Self.isSealedData(raw) else { return raw }
+        guard vault.isUnlocked, let opened = try? vault.open(raw) else { return nil }
+        return opened
+    }
+
+    public func loadImage(for item: ClipItem) -> NSImage? {
+        decryptedImageData(for: item).flatMap(NSImage.init(data:))
+    }
+
+    /// Bounded decode: decrypt then thumbnail straight off the data — the
+    /// full bitmap never materializes.
+    public func downsampledThumbnail(for item: ClipItem, maxPixel: Int) -> NSImage? {
+        guard let data = decryptedImageData(for: item),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
+    /// After unlock: captures buffered in RAM while locked enter the store
+    /// normally (they get sealed now that the key is available).
+    public func flushPendingCaptures() {
+        guard !pendingLocked.isEmpty else { return }
+        let buffered = pendingLocked
+        pendingLocked.removeAll()
+        log("flushing \(buffered.count) locked-period captures")
+        for clip in buffered {
+            add(clip)
+        }
+    }
+
+    /// Rewrites text and image bytes to match the vault state. Requires an
+    /// unlocked vault when enabling; runs row-by-row at the DB level because
+    /// in-memory items already hold decoded text.
+    public func migrateAll(enabled: Bool) {
+        guard enabled ? vault.isUnlocked : true else {
+            log("migration aborted: vault locked")
+            return
+        }
+        let rows = (try? db.query(
+            "SELECT id, kind, text, image_path FROM clips", [],
+            map: { stmt -> (Int64, String, String?, String?) in
+                let id = sqlite3_column_int64(stmt, 0)
+                let kind = String(cString: sqlite3_column_text(stmt, 1))
+                let t = sqlite3_column_text(stmt, 2) != nil ? String(cString: sqlite3_column_text(stmt, 2)) : nil
+                let p = sqlite3_column_text(stmt, 3) != nil ? String(cString: sqlite3_column_text(stmt, 3)) : nil
+                return (id, kind, t, p)
+            }
+        )) ?? []
+        var migrated = 0
+        for (id, kind, storedText, imagePath) in rows {
+            do {
+                if enabled {
+                    if let stored = storedText, !stored.hasPrefix(VaultCoding.textPrefix),
+                       let sealed = VaultCoding.encodeText(stored, vault: vault) {
+                        try db.run("UPDATE clips SET text = ? WHERE id = ?", [.text(sealed), .int(Int(id))])
+                        migrated += 1
+                    }
+                    if kind == ClipKind.image.rawValue, let path = imagePath,
+                       let bytes = FileManager.default.contents(atPath: path), !Self.isSealedData(bytes) {
+                        try vault.seal(bytes).write(to: URL(fileURLWithPath: path), options: .atomic)
+                        migrated += 1
+                    }
+                } else {
+                    if let stored = storedText, stored.hasPrefix(VaultCoding.textPrefix) {
+                        let plain = VaultCoding.decodeText(stored, vault: vault) ?? ""
+                        let hash = "m:" + SHA256.hash(data: Data(kind.utf8) + Data(plain.utf8))
+                            .map { String(format: "%02x", $0) }.joined()
+                        try db.run("UPDATE clips SET text = ?, content_hash = ? WHERE id = ?",
+                                   [.text(plain), .text(hash), .int(Int(id))])
+                        migrated += 1
+                    }
+                    if kind == ClipKind.image.rawValue, let path = imagePath,
+                       let bytes = FileManager.default.contents(atPath: path), Self.isSealedData(bytes) {
+                        let plain = try vault.open(bytes)
+                        try plain.write(to: URL(fileURLWithPath: path), options: .atomic)
+                        migrated += 1
+                    }
+                }
+            } catch {
+                log("migration item \(id) failed: \(error)")
+            }
+        }
+        reload()
+        log("vault migration (enabled=\(enabled)): \(migrated) transforms")
+    }
+
     // MARK: - Internals
 
     private func reload() {
@@ -254,17 +391,36 @@ public final class ClipStore {
             }
             let w = sqlite3_column_type(stmt, 4) != SQLITE_NULL ? sqlite3_column_double(stmt, 4) : nil
             let h = sqlite3_column_type(stmt, 5) != SQLITE_NULL ? sqlite3_column_double(stmt, 5) : nil
+            // Encrypted-at-rest text: decrypt when unlocked, redact when locked.
+            var plain: String?
+            var redacted = false
+            if let stored = text(2) {
+                if stored.hasPrefix(VaultCoding.textPrefix) {
+                    if let opened = VaultCoding.decodeText(stored, vault: vault) {
+                        plain = opened
+                    } else {
+                        redacted = true
+                    }
+                } else {
+                    plain = stored
+                }
+            }
+            if let kind = text(1), kind == ClipKind.image.rawValue,
+               let path = text(3), isSealedFile(path) {
+                redacted = true // image bytes unavailable while locked
+            }
             return ClipItem(
                 id: sqlite3_column_int64(stmt, 0),
                 kind: ClipKind(rawValue: String(cString: sqlite3_column_text(stmt, 1))) ?? .text,
-                text: text(2),
+                text: plain,
                 imagePath: text(3),
                 imageSize: (w != nil && h != nil) ? CGSize(width: w!, height: h!) : nil,
                 sourceBundle: text(6),
                 sourceName: text(7),
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 8)),
                 pinned: sqlite3_column_int(stmt, 9) != 0,
-                contentHash: text(10) ?? ""
+                contentHash: text(10) ?? "",
+                redacted: redacted
             )
         }) ?? []
         rebuildIndex()
@@ -301,7 +457,7 @@ public final class ClipStore {
         }
     }
 
-    private static func contentHash(_ clip: NewClip) -> String {
+    private static func contentHash(_ clip: NewClip, vault: Vault) -> String {
         var data = Data(clip.kind.rawValue.utf8)
         data.append(0)
         if let text = clip.text {
@@ -309,6 +465,10 @@ public final class ClipStore {
         }
         if let image = clip.imageData {
             data.append(image)
+        }
+        // Keyed hash when the vault is on: duplicate-equality never leaks at rest.
+        if vault.isEnabled, vault.isUnlocked, let keyed = vault.keyedHash(data) {
+            return "h1:" + keyed
         }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }

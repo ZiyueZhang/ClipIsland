@@ -11,6 +11,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     public var onChangeCapacity: ((Int) -> Void)?
     public var onChangeHotkeys: (() -> Void)?
+    /// Fired after vault setup with the key alive: the coordinator runs the
+    /// store migration, then (for removals) the model wipes vault metadata.
+    public var onChangeVaultEnabled: ((Bool) -> Void)?
+    public var onChangeVaultUnlocked: (() -> Void)?
 
     public init(settings: SettingsStore) {
         model = SettingsUIModel(settings: settings)
@@ -60,11 +64,25 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 final class SettingsUIModel {
     let settings: SettingsStore
     weak var controller: SettingsWindowController?
+    let vault = Vault.shared
 
     var accessibilityGranted = AutoPaster.isAccessibilityTrusted
     var screenCaptureGranted = CaptureService.hasScreenCapturePermission
     var loginItemStatus: SMAppService.Status = SMAppService.mainApp.status
     var loginItemError: String?
+
+    // Vault form state
+    var vaultEnabled = Vault.shared.isEnabled
+    var vaultLocked = Vault.shared.state == .locked
+    var newPassword = ""
+    var confirmPassword = ""
+    var currentPassword = ""
+    var unlockPassword = ""
+    var removePassword = ""
+    var vaultError: String?
+    var touchIDUsable = Vault.isTouchIDAvailable
+    var touchIDOn = Vault.shared.metadata?.touchIDEnabled ?? false
+    var autoLockMinutes = Vault.shared.metadata?.autoLockMinutes ?? 15
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -74,6 +92,96 @@ final class SettingsUIModel {
         accessibilityGranted = AutoPaster.isAccessibilityTrusted
         screenCaptureGranted = CaptureService.hasScreenCapturePermission
         loginItemStatus = SMAppService.mainApp.status
+        refreshVault()
+    }
+
+    func refreshVault() {
+        vaultEnabled = vault.isEnabled
+        vaultLocked = vault.state == .locked
+        touchIDUsable = Vault.isTouchIDAvailable
+        touchIDOn = vault.metadata?.touchIDEnabled ?? false
+        autoLockMinutes = vault.metadata?.autoLockMinutes ?? 15
+    }
+
+    func enableVault() {
+        do {
+            try vault.setup(password: newPassword)
+            vaultError = nil
+            newPassword = ""
+            confirmPassword = ""
+            refreshVault()
+            controller?.onChangeVaultEnabled?(true)
+        } catch {
+            vaultError = "启用失败：\(error)"
+        }
+    }
+
+    func unlockVault() {
+        do {
+            try vault.unlock(password: unlockPassword)
+            vaultError = nil
+            unlockPassword = ""
+            refreshVault()
+            controller?.onChangeVaultUnlocked?()
+        } catch {
+            vaultError = "密码错误"
+        }
+    }
+
+    func unlockVaultTouchID() {
+        do {
+            try vault.unlockTouchID()
+            vaultError = nil
+            refreshVault()
+            controller?.onChangeVaultUnlocked?()
+        } catch {
+            vaultError = "触控 ID 失败：\(error)"
+        }
+    }
+
+    func lockNow() {
+        vault.lock()
+        refreshVault()
+    }
+
+    func toggleTouchID(_ on: Bool) {
+        do {
+            on ? try vault.enableTouchID() : try vault.disableTouchID()
+            vaultError = nil
+        } catch {
+            vaultError = "\(error)"
+        }
+        refreshVault()
+    }
+
+    func setAutoLock(_ minutes: Int) {
+        do { try vault.setAutoLock(minutes: minutes) } catch { vaultError = "\(error)" }
+        refreshVault()
+    }
+
+    func changePassword() {
+        do {
+            try vault.changePassword(current: currentPassword, new: newPassword)
+            vaultError = nil
+            currentPassword = ""
+            newPassword = ""
+            confirmPassword = ""
+        } catch {
+            vaultError = "更改失败：\(error)"
+        }
+    }
+
+    func disableVault() {
+        do {
+            try vault.unlock(password: removePassword) // key alive for migration
+            controller?.onChangeVaultEnabled?(false)   // store decrypts everything
+            vault.wipeMetadata()                        // then the vault is removed
+            vaultError = nil
+            removePassword = ""
+            refreshVault()
+        } catch {
+            vaultError = "移除失败：\(error)"
+        }
     }
 
     func toggleLaunchAtLogin(_ on: Bool) {
@@ -132,6 +240,8 @@ private struct SettingsRootView: View {
         TabView {
             GeneralTab(model: model)
                 .tabItem { Label("通用", systemImage: "gearshape") }
+            SecurityTab(model: model)
+                .tabItem { Label("安全", systemImage: "lock.encrypted") }
             HotkeyTab(model: model)
                 .tabItem { Label("快捷键", systemImage: "keyboard") }
             PermissionsTab(model: model)
@@ -221,12 +331,93 @@ private struct GeneralTab: View {
     }
 }
 
+private struct SecurityTab: View {
+    let model: SettingsUIModel
+    // Plain fields on a plain holder — the CLT toolchain cannot expand
+    // SwiftUI @State/@Field macros; values live in the observable model.
+    var body: some View {
+        Form {
+            if !model.vaultEnabled {
+                Section("启用加密") {
+                    SecureField("主密码（至少 4 位）", text: Binding(
+                        get: { model.newPassword }, set: { model.newPassword = $0 }
+                    ))
+                    SecureField("确认密码", text: Binding(
+                        get: { model.confirmPassword }, set: { model.confirmPassword = $0 }
+                    ))
+                    Button("启用加密保护") { model.enableVault() }
+                        .disabled(model.newPassword.count < 4 || model.newPassword != model.confirmPassword)
+                    Text("启用后历史内容（文本与图片）将以 AES-256-GCM 加密落盘，主密码经 PBKDF2（600,000 次迭代）派生密钥。已有条目会自动迁移。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Section("加密已启用") {
+                    if model.vaultLocked {
+                        Text("🔒 当前已锁定")
+                            .foregroundStyle(.orange)
+                        SecureField("主密码解锁", text: Binding(
+                            get: { model.unlockPassword }, set: { model.unlockPassword = $0 }
+                        ))
+                        Button("解锁") { model.unlockVault() }
+                        if model.touchIDUsable {
+                            Button("用触控 ID 解锁") { model.unlockVaultTouchID() }
+                        }
+                    } else {
+                        Text("✅ 已解锁（密钥在内存中）")
+                            .foregroundStyle(.green)
+                        Button("立即锁定") { model.lockNow() }
+                        Toggle("用触控 ID 解锁", isOn: Binding(
+                            get: { model.touchIDOn }, set: { model.toggleTouchID($0) }
+                        ))
+                        .disabled(!model.touchIDUsable)
+                        Picker("自动锁定", selection: Binding(
+                            get: { model.autoLockMinutes },
+                            set: { model.setAutoLock($0) }
+                        )) {
+                            ForEach([1, 5, 15, 30, 60, 0], id: \.self) { n in
+                                Text(n == 0 ? "从不" : "\(n) 分钟").tag(n)
+                            }
+                        }
+                    }
+                }
+                Section("更改密码") {
+                    SecureField("当前密码", text: Binding(
+                        get: { model.currentPassword }, set: { model.currentPassword = $0 }
+                    ))
+                    SecureField("新密码", text: Binding(
+                        get: { model.newPassword }, set: { model.newPassword = $0 }
+                    ))
+                    SecureField("确认新密码", text: Binding(
+                        get: { model.confirmPassword }, set: { model.confirmPassword = $0 }
+                    ))
+                    Button("更改密码") { model.changePassword() }
+                        .disabled(model.currentPassword.isEmpty || model.newPassword.count < 4 || model.newPassword != model.confirmPassword)
+                }
+                Section("移除加密") {
+                    SecureField("当前密码", text: Binding(
+                        get: { model.removePassword }, set: { model.removePassword = $0 }
+                    ))
+                    Button("移除加密并解密全部条目", role: .destructive) { model.disableVault() }
+                        .disabled(model.removePassword.isEmpty)
+                    Text("移除后所有条目解密回明文存储。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let error = model.vaultError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 private struct HotkeyTab: View {
     let model: SettingsUIModel
     var settings: SettingsStore { model.settings }
 
     static let panelPresets = ["cmd+shift+v", "option+shift+v", "ctrl+shift+v", "cmd+shift+b"]
     static let shotPresets = ["cmd+shift+6", "cmd+shift+7", "option+shift+s", "ctrl+shift+6"]
+    static let windowPresets = ["cmd+shift+7", "cmd+shift+8", "option+shift+w", "ctrl+shift+7"]
 
     var body: some View {
         Form {
@@ -250,6 +441,15 @@ private struct HotkeyTab: View {
                     }
                 )) {
                     ForEach(Self.shotPresets, id: \.self) { Text($0.replacingCombo).tag($0) }
+                }
+                Picker("窗口截图", selection: Binding(
+                    get: { settings.windowCaptureHotkey },
+                    set: {
+                        settings.windowCaptureHotkey = $0
+                        model.hotkeyChanged()
+                    }
+                )) {
+                    ForEach(Self.windowPresets, id: \.self) { Text($0.replacingCombo).tag($0) }
                 }
             }
         }

@@ -60,6 +60,11 @@ public final class SettingsStore {
         set { defaults.set(newValue, forKey: "screenshotHotkey") }
     }
 
+    public var windowCaptureHotkey: String {
+        get { defaults.string(forKey: "windowCaptureHotkey") ?? "cmd+shift+7" }
+        set { defaults.set(newValue, forKey: "windowCaptureHotkey") }
+    }
+
     public func picturesDirectoryURL() -> URL {
         FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ClipIsland", isDirectory: true)

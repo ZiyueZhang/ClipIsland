@@ -40,9 +40,11 @@ ClipIsland lives in your MacBook's notch. Hover over it (or press ⌘⇧V) and a
 - Click = **copy + auto-paste** back into the app you came from (CGEvent ⌘V, can be set to copy-only)
 - Password-manager content is skipped (nspasteboard.org concealed markers)
 - Persisted in SQLite — survives restarts; pause monitoring from the menu bar
+- **Optional encryption at rest**: AES-256-GCM + PBKDF2 (600k iterations), lock screen with Touch ID, auto-lock; copies made while locked buffer in RAM and merge on unlock
 
 **Screenshot**
 - ⌘⇧6 region capture: screen freeze, drag-select, live size label, crosshair
+- ⌘⇧7 window capture: live highlight of the window under the cursor, click to capture occlusion-free
 - **Color picker**: live hex under the cursor while selecting, ⌘C to copy
 - ⏎ captures the full screen, Esc cancels, click cancels
 - Thumbnail "hangs" under the notch for 2.5s, auto-enters history (instantly pasteable), optional file save
@@ -107,6 +109,7 @@ Two permissions (both optional, with graceful fallbacks — a first-run wizard o
 | Action | Default | Alternatives (Settings) |
 |---|---|---|
 | Clipboard panel | ⌘⇧V | ⌥⇧V / ⌃⇧V / ⌘⇧B |
+| Window capture | ⌘⇧7 | ⌘⇧8 / ⌥⇧W / ⌃⇧7 |
 | Region screenshot | ⌘⇧6 | ⌘⇧7 / ⌥⇧S / ⌃⇧6 |
 
 In the panel: type to search · ↑↓ select · ⏎ paste · 1-9 direct paste · Esc clears search → filter → closes.

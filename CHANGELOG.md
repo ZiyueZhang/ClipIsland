@@ -3,6 +3,19 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.2.0] - 2026-10-27
+
+### Added
+- **Window capture mode** (⌘⇧7, re-mappable): live accent highlight of the window under the cursor with an app-name chip, click captures it occlusion-safe via its window number — no screen freeze needed
+- **Quick Look** (space in the panel): full previews for images, files, text and links
+- **Drag out of history**: image/file rows drag as real files into Finder, editors and mail; text/link rows drag their string
+- **Encryption at rest (v2)**: AES-256-GCM under a random data key wrapped by PBKDF2-HMAC-SHA256 (600k iterations, RFC-vector tested) — text payloads and image files are sealed in the database and on disk; dedup uses keyed HMACs so duplicate-equality never leaks
+- Lock screen in the panel with Touch ID unlock; auto-lock (1–60 min); "立即锁定" menu item; captures made while locked are buffered in RAM and merge into encrypted history on unlock (fixes the silent-drop flaw copyx ships with)
+- Migration: enabling/disabling encryption rewrites all existing items in place
+
+### Changed
+- SQLite metadata now public to the test harness; image reads route through the vault everywhere (pasteboard, editor, Quick Look, thumbnails, drag)
+
 ## [1.1.0] - 2026-10-27
 
 ### Added
