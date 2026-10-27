@@ -3,6 +3,19 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.3.0] - 2026-10-28
+
+### Added — animation & aesthetics pass (source review: Sapphire morph engine, boring.notch NotchShape, tendedero springs)
+- Notch silhouette adopted from boring.notch: top radius 6 (fuses with the screen top), bottom radius 14 — replaces the uniform rounded rect
+- **Motion profiles** in Settings (利落/灵动/沉稳), parameters after Sapphire's Snappy/Bouncy/Calm
+- **Velocity-carrying interruptible springs**: redirecting mid-animation keeps momentum instead of restarting from rest (Sapphire morph-engine behavior)
+- Hover peek: the collapsed strip scales 1.02× under the pointer; expanded panel content breathes (scale+opacity) with the phase spring
+- Reduce Motion now gates every SwiftUI animation as well as window frame motion
+
+### Changed
+- **Hover trigger narrowed to directly below the notch** (user request): the dwell zone is the strip's own footprint padded 18pt down — no longer the whole menu bar; clicks in the zone still suppress triggering
+- Settings label updated accordingly
+
 ## [1.2.1] - 2026-10-28
 
 ### Fixed (first visual audit — offscreen render harness added)

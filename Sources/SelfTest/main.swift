@@ -419,28 +419,6 @@ do {
     expect(pb.data(forType: .tiff) != nil, "tiff flavor present")
 }
 
-// MARK: - Menu-bar band math
-
-do {
-    print("MenuBarHoverMonitor: band")
-    // Regular 14" MBP logical geometry: menu bar 38pt tall.
-    let band = MenuBarHoverMonitor.band(
-        screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
-        visibleFrame: CGRect(x: 0, y: 38, width: 1512, height: 944),
-        statusBarThickness: 24, topInset: 38
-    )
-    expect(band.height == 38, "band uses visible-frame delta (\(band.height))")
-    expect(band.maxY == 982, "band pinned to screen top")
-
-    // Auto-hiding menu bar: visible frame reaches the top -> fallback.
-    let fallback = MenuBarHoverMonitor.band(
-        screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
-        visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 982),
-        statusBarThickness: 24, topInset: 32
-    )
-    expect(fallback.height == 32, "fallback uses top inset (\(fallback.height))")
-}
-
 
 // MARK: - Vault crypto
 
@@ -566,6 +544,25 @@ do {
     expect(reloaded.all.contains { $0.text == "locked-period capture" }, "buffered capture stored")
     let rawSealed = try raw.query("SELECT COUNT(*) FROM clips WHERE text LIKE 'enc:%'", []) { Int(sqlite3_column_int($0, 0)) }
     expect((rawSealed.first ?? 0) >= 2, "buffered capture sealed at rest (\(rawSealed.first ?? -1))")
+}
+
+
+// MARK: - Hover dwell zone
+
+do {
+    print("MenuBarHoverMonitor: dwell zone")
+    // Strip (notch 216 + ears) at the top of a 1800x1169 display.
+    let strip = CGRect(x: 640, y: 1131, width: 480, height: 38)
+    let zone = MenuBarHoverMonitor.dwellZone(stripFrame: strip)
+    expect(zone.width == 480, "zone keeps strip width (\(zone.width))")
+    expect(zone.minY == strip.minY - 18, "zone pads 18pt above (menu-bar row) (\(zone.minY))")
+    expect(zone.maxY == strip.maxY + 18, "zone reaches 18pt below the strip (\(zone.maxY))")
+    // Pointer just below the notch center is inside; a far menu-bar corner is not.
+    expect(zone.contains(NSPoint(x: 880, y: 1120)), "directly below notch triggers")
+    expect(!zone.contains(NSPoint(x: 200, y: 1140)), "far menu-bar corner does not trigger")
+    // Custom padding honored.
+    let tight = MenuBarHoverMonitor.dwellZone(stripFrame: strip, belowPadding: 0)
+    expect(tight == strip, "zero padding = strip itself")
 }
 
 print("")

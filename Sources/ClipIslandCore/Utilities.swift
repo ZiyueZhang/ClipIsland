@@ -1,4 +1,10 @@
+import AppKit
 import Foundation
+
+/// System Reduce Motion setting — gates every decorative animation.
+public var reduceMotion: Bool {
+    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+}
 
 public func log(_ message: String) {
     FileHandle.standardError.write(Data("[ClipIsland] \(message)\n".utf8))

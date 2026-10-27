@@ -72,6 +72,7 @@ public final class NotchModel {
     public var vaultTouchIDAvailable = Vault.isTouchIDAvailable
     public var vaultPendingCount = 0
     public var vaultPasswordField = ""
+    public var hoverInside = false
     public var dragProvider: ((ClipItem) -> NSItemProvider?)?
 
     /// Coordinator hook: hover summon is suppressed while the vault is locked.

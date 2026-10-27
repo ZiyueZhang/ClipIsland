@@ -16,8 +16,11 @@ struct NotchRootView: View {
                     .transition(.opacity)
             }
         }
-        .onHover { model.setHover(inside: $0) }
-        .animation(.spring(response: 0.38, dampingFraction: 0.82), value: model.phase)
+        .onHover { inside in
+            model.hoverInside = inside
+            model.setHover(inside: inside)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.8), value: model.phase)
     }
 }
 
@@ -44,6 +47,7 @@ public struct CollapsedStrip: View {
             .frame(height: info.headerHeight)
             .frame(maxWidth: .infinity)
             .background(StripShape(hasRealNotch: info.hasRealNotch).fill(Color.black))
+        .scaleEffect(model.hoverInside && model.phase == .collapsed ? 1.02 : 1)
             .contentShape(Rectangle())
             .onTapGesture { model.toggle() }
 
@@ -61,7 +65,7 @@ public struct CollapsedStrip: View {
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: model.hangingImage != nil)
+        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.75), value: model.hangingImage != nil)
     }
 }
 
@@ -118,21 +122,45 @@ private struct RightIslandText: View {
     }
 }
 
-/// Capsule on non-notch Macs; on real-notch Macs the window already matches
-/// the notch shape, so a plain rectangle with slightly rounded corners blends in.
-struct StripShape: Shape {
+/// Notch silhouette after boring.notch's NotchShape: the top edge stays
+/// nearly square (it fuses with the screen top), the bottom carries the
+/// larger radius that reads as "hardware". On non-notch Macs the same shape
+/// reads as a floating pill.
+public struct StripShape: Shape {
     let hasRealNotch: Bool
+    let topRadius: CGFloat
+    let bottomRadius: CGFloat
 
-    func path(in rect: CGRect) -> Path {
-        if hasRealNotch {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 10, bottomLeadingRadius: 12,
-                bottomTrailingRadius: 12, topTrailingRadius: 10
-            )
-            .path(in: rect)
-        } else {
-            Capsule().path(in: rect)
-        }
+    public init(hasRealNotch: Bool, topRadius: CGFloat = 6, bottomRadius: CGFloat = 14) {
+        self.hasRealNotch = hasRealNotch
+        self.topRadius = topRadius
+        self.bottomRadius = bottomRadius
+    }
+
+    public func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topRadius, y: rect.minY + topRadius),
+            control: CGPoint(x: rect.minX + topRadius, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + topRadius, y: rect.maxY - bottomRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topRadius + bottomRadius, y: rect.maxY),
+            control: CGPoint(x: rect.minX + topRadius, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - topRadius - bottomRadius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - topRadius, y: rect.maxY - bottomRadius),
+            control: CGPoint(x: rect.maxX - topRadius, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - topRadius, y: rect.minY + topRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.maxX - topRadius, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        return path
     }
 }
 
@@ -156,6 +184,8 @@ public struct ExpandedPanel: View {
                 PanelContent(model: model)
             }
         }
+        .scaleEffect(model.phase == .expanded && !reduceMotion ? 1.0 : 0.97)
+        .opacity(model.phase == .expanded || reduceMotion ? 1.0 : 0.6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(VisualEffectView(material: .hudWindow))
         .clipShape(

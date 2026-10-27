@@ -175,12 +175,15 @@ public final class AppCoordinator: NSObject {
             guard let self else { return }
             self.notchModel.expand()
         }
-        hoverMonitor.start { [weak self] in
-            guard let self else { return false }
-            return self.notchModel.phase == .collapsed
-                && self.notchModel.expandOnHover
-                && !self.notchModel.vaultLocked
-        }
+        hoverMonitor.start(
+            shouldRun: { [weak self] in
+                guard let self else { return false }
+                return self.notchModel.phase == .collapsed
+                    && self.notchModel.expandOnHover
+                    && !self.notchModel.vaultLocked
+            },
+            zoneProvider: { [weak self] in self?.notchWindow?.dwellZone }
+        )
     }
 
     private func wireSettingsWindow() {

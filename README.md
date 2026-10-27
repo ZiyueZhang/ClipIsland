@@ -34,7 +34,7 @@ ClipIsland lives in your MacBook's notch. Hover over it (or press ⌘⇧V) and a
 ## Features
 
 **Clipboard (full copyx-class feature set)**
-- Summon from anywhere in the menu bar (250ms dwell, click-suppression), not just the notch
+- Summon by resting the pointer just below the notch (250ms dwell, click-suppression)
 - Auto-captures text, links, file paths and images — deduplicated, searchable
 - Pin entries (exempt from eviction), delete, clear, capacity limit (100–2000, LRU)
 - Click = **copy + auto-paste** back into the app you came from (CGEvent ⌘V, can be set to copy-only)

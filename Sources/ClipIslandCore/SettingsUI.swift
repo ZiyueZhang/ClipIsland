@@ -288,12 +288,20 @@ private struct GeneralTab: View {
                     Text("仅复制").tag(false)
                 }
                 toggle(
-                    title: "鼠标悬停刘海展开面板",
+                    title: "鼠标悬停刘海下方展开面板",
                     isOn: Binding(
                         get: { settings.expandOnHover },
                         set: { settings.expandOnHover = $0 }
                     )
                 )
+                Picker("动画风格", selection: Binding(
+                    get: { settings.animationProfile },
+                    set: { settings.animationProfile = $0 }
+                )) {
+                    Text("利落").tag("snappy")
+                    Text("灵动").tag("bouncy")
+                    Text("沉稳").tag("calm")
+                }
             }
 
             Section("截图") {

@@ -7,6 +7,30 @@ import QuartzCore
 /// the same motion feel. Steps at 120Hz on the main queue; CADisplayLink is
 /// unavailable on macOS, and vsync alignment matters less than the physics.
 public final class FrameAnimator {
+    /// Motion profiles after Sapphire's Snappy/Bouncy/Calm, tuned with
+    /// boring.notch's open/close springs as the Snappy baseline.
+    public enum Profile {
+        case snappy
+        case bouncy
+        case calm
+
+        var expand: (response: Double, damping: Double) {
+            switch self {
+            case .snappy: return (0.40, 0.75)
+            case .bouncy: return (0.52, 0.55)
+            case .calm: return (0.50, 1.00)
+            }
+        }
+
+        var collapse: (response: Double, damping: Double) {
+            switch self {
+            case .snappy: return (0.32, 1.00)
+            case .bouncy: return (0.36, 0.85)
+            case .calm: return (0.40, 1.00)
+            }
+        }
+    }
+
     private var timer: DispatchSourceTimer?
     private var s: Double = 0 // progress 0...1 (may overshoot for underdamped)
     private var v: Double = 0
@@ -39,11 +63,15 @@ public final class FrameAnimator {
         return (omega * omega, 2 * dampingFraction * omega)
     }
 
+    /// `initialVelocity` carries momentum across retargets (Sapphire-style
+    /// interruptible springs): a mid-flight redirect keeps its speed instead
+    /// of restarting from rest.
     init?(
         from: CGRect,
         to: CGRect,
-        response: Double = 0.4,
-        dampingFraction: Double = 0.82,
+        profile: Profile = .snappy,
+        expanding: Bool = true,
+        initialVelocity: Double = 0,
         reduceMotion: Bool = false,
         apply: @escaping (CGRect) -> Void
     ) {
@@ -55,7 +83,9 @@ public final class FrameAnimator {
             apply(to)
             return nil
         }
-        (k, c) = Self.coefficients(response: response, dampingFraction: dampingFraction)
+        let params = expanding ? profile.expand : profile.collapse
+        (k, c) = Self.coefficients(response: params.response, dampingFraction: params.damping)
+        v = max(-4, min(4, initialVelocity))
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: 1.0 / 120.0, leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in

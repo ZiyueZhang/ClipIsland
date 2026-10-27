@@ -24,6 +24,10 @@ public final class NotchWindowController {
     private var layout: NotchLayout
     private var screenObserver: NSObjectProtocol?
     private var frameAnimator: FrameAnimator?
+    /// Momentum carried across retargets so mid-flight redirects feel liquid.
+    private var lastVelocity: Double = 0
+    private var lastFrom: CGRect = .zero
+    private var lastTo: CGRect = .zero
 
     public init(model: NotchModel) {
         self.model = model
@@ -63,9 +67,11 @@ public final class NotchWindowController {
 
     // MARK: Island screen facts (used by the menu-bar hover monitor)
 
-    public var islandScreenFrame: CGRect { layout.screen.frame }
-    public var islandScreenVisibleFrame: CGRect { layout.screen.visibleFrame }
-    public var islandScreenTopInset: CGFloat { layout.screen.safeAreaInsets.top }
+    /// Live dwell zone for the hover monitor: the collapsed strip's frame
+    /// (which already extends past the notch) padded straight down.
+    public var dwellZone: CGRect {
+        MenuBarHoverMonitor.dwellZone(stripFrame: collapsedTarget())
+    }
 
     private func buildPanel() {
         let p = NotchPanel(
@@ -99,24 +105,32 @@ public final class NotchWindowController {
 
     private func apply(phase: NotchModel.Phase, animated: Bool) {
         let target = phase == .collapsed ? collapsedTarget() : layout.expandedFrame
+        let previousSpan = frameAnimator != nil ? abs(lastFrom.width - lastTo.width) : 0
         frameAnimator?.cancel()
         guard animated else {
+            lastVelocity = 0
             panel.setFrame(target, display: true)
             if phase == .expanded { panel.makeKeyAndOrderFront(nil); focusSearchField() }
             return
         }
-        // Collapse is near-critically damped (no bounce); expand has a light spring.
-        let response: Double = phase == .collapsed ? 0.32 : 0.42
-        let damping: Double = phase == .collapsed ? 1.0 : 0.82
+        let profileName = SettingsStore.shared.animationProfile
+        let profile: FrameAnimator.Profile = profileName == "bouncy" ? .bouncy : (profileName == "calm" ? .calm : .snappy)
+        let from = panel.frame
+        // Carry momentum: scale the previous progress-velocity into the new span.
+        let newSpan = abs(from.width - target.width) + abs(from.height - target.height) + 1
+        let carried = previousSpan > 0 ? lastVelocity * (previousSpan / newSpan) : 0
         frameAnimator = FrameAnimator(
-            from: panel.frame,
+            from: from,
             to: target,
-            response: response,
-            dampingFraction: damping,
+            profile: profile,
+            expanding: phase == .expanded,
+            initialVelocity: carried,
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         ) { [weak self] frame in
             self?.panel.setFrame(frame, display: true)
         }
+        lastFrom = from
+        lastTo = target
         if phase == .expanded {
             panel.makeKeyAndOrderFront(nil)
             focusSearchField()

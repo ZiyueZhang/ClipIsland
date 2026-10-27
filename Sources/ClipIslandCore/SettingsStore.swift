@@ -60,6 +60,11 @@ public final class SettingsStore {
         set { defaults.set(newValue, forKey: "screenshotHotkey") }
     }
 
+    public var animationProfile: String {
+        get { defaults.string(forKey: "animationProfile") ?? "snappy" }
+        set { defaults.set(newValue, forKey: "animationProfile") }
+    }
+
     public var windowCaptureHotkey: String {
         get { defaults.string(forKey: "windowCaptureHotkey") ?? "cmd+shift+7" }
         set { defaults.set(newValue, forKey: "windowCaptureHotkey") }
