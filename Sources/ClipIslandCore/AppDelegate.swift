@@ -257,7 +257,7 @@ public final class AppCoordinator: NSObject {
     private func deliverScreenshot(_ image: CGImage) {
         guard let png = CaptureService.shared.pngData(from: image) else { return }
 
-        store?.add(
+        let item = store?.add(
             NewClip(
                 kind: .image, imageData: png,
                 sourceBundle: Bundle.main.bundleIdentifier, sourceName: "ClipIsland 截图"
@@ -291,6 +291,17 @@ public final class AppCoordinator: NSObject {
                 onEdit: { [weak self] in self?.openEditor(image: image) },
                 onReveal: savedURL.map { url in
                     { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                },
+                dragProvider: { [weak self] in
+                    guard let self, let item, let data = self.store?.decryptedImageData(for: item) else {
+                        return nil
+                    }
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("clipisland-capture.png")
+                    do {
+                        try data.write(to: url, options: .atomic)
+                        return NSItemProvider(object: url as NSURL)
+                    } catch { return nil }
                 }
             )
         }

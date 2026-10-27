@@ -73,6 +73,12 @@ public final class NotchModel {
     public var vaultPendingCount = 0
     public var vaultPasswordField = ""
     public var hoverInside = false
+
+    // Corner radii morph with the window animation (window + content share
+    // one motion system): collapsed 6/14 -> expanded 18/26, stepped by the
+    // FrameAnimator tick. Reduce Motion snaps straight to the finals.
+    public var cornerTop: CGFloat = 6
+    public var cornerBottom: CGFloat = 14
     public var dragProvider: ((ClipItem) -> NSItemProvider?)?
 
     /// Coordinator hook: hover summon is suppressed while the vault is locked.

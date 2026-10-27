@@ -3,6 +3,16 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.4.0] - 2026-10-28
+
+### Added
+- **Liquid Glass**: the expanded panel's surface is now NSGlassEffectView on macOS 26+ (interactive on 27), dark-appearance locked so light wallpapers never wash out the content; vibrancy fallback below 26 or with CLIPISLAND_NO_GLASS=1
+- **Corner-radius morph**: radii (6/14 → 18/26) ride the window animation tick — glass, SwiftUI clip and stroke all morph in lockstep with the frame (completes the single-motion-system story)
+- Post-capture bar: drag the thumbnail out as a file (decrypted temp under the vault)
+
+### Fixed
+- Collapse resets strip radii to their closed values from the first frame
+
 ## [1.3.0] - 2026-10-28
 
 ### Added — animation & aesthetics pass (source review: Sapphire morph engine, boring.notch NotchShape, tendedero springs)

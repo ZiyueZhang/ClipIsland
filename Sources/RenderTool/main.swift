@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 import ClipIslandCore
 
+// Glass has no backdrop to sample offscreen — force the vibrancy fallback so
+// the snapshots verify layout/typography (real glass is verified on-screen).
+setenv("CLIPISLAND_NO_GLASS", "1", 1)
+
 /// Offscreen UI renderer: instantiates the island's real SwiftUI surfaces in
 /// on-screen windows and snapshots them via cacheDisplay (no screen-recording
 /// permission needed — it's our own window content). Output: /tmp/ci-render.

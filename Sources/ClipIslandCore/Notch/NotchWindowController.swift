@@ -119,6 +119,12 @@ public final class NotchWindowController {
         // Carry momentum: scale the previous progress-velocity into the new span.
         let newSpan = abs(from.width - target.width) + abs(from.height - target.height) + 1
         let carried = previousSpan > 0 ? lastVelocity * (previousSpan / newSpan) : 0
+        if phase == .collapsed {
+            // The strip view is what shows during the collapse animation —
+            // its radii are final from the first frame.
+            model.cornerTop = 6
+            model.cornerBottom = 14
+        }
         frameAnimator = FrameAnimator(
             from: from,
             to: target,
@@ -127,10 +133,24 @@ public final class NotchWindowController {
             initialVelocity: carried,
             reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         ) { [weak self] frame in
-            self?.panel.setFrame(frame, display: true)
+            guard let self else { return }
+            self.panel.setFrame(frame, display: true)
+            // Corner radii ride the same physics: content and window morph
+            // in lockstep (boring.notch's animatable radii, Sapphire's single
+            // motion system).
+            let span = abs(lastFrom.width - lastTo.width)
+            let t = span > 1 ? max(0, min(1, (frame.width - min(lastFrom.width, lastTo.width)) / span)) : (phase == .expanded ? 1 : 0)
+            if phase == .expanded {
+                self.model.cornerTop = 6 + (18 - 6) * CGFloat(t)
+                self.model.cornerBottom = 14 + (26 - 14) * CGFloat(t)
+            }
         }
         lastFrom = from
         lastTo = target
+        if phase == .expanded, NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            model.cornerTop = 18
+            model.cornerBottom = 26
+        }
         if phase == .expanded {
             panel.makeKeyAndOrderFront(nil)
             focusSearchField()

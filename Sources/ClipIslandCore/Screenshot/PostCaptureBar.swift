@@ -13,6 +13,8 @@ public final class PostCaptureModel {
     public var onCopy: () -> Void = {}
     public var onEdit: () -> Void = {}
     public var onReveal: () -> Void = {}
+    /// Drag payload for the thumbnail (coordinator writes a temp file).
+    public var dragProvider: () -> NSItemProvider? = { nil }
 }
 
 public final class PostCaptureBar {
@@ -30,13 +32,15 @@ public final class PostCaptureBar {
         thumbnail: NSImage,
         onCopy: @escaping () -> Void,
         onEdit: @escaping () -> Void,
-        onReveal: (() -> Void)?
+        onReveal: (() -> Void)?,
+        dragProvider: (() -> NSItemProvider?)? = nil
     ) {
         model.thumbnail = thumbnail
         model.onCopy = { onCopy(); self.hide() }
         model.onEdit = { onEdit(); self.hide() }
         model.canReveal = onReveal != nil
         model.onReveal = { onReveal?(); self.hide() }
+        model.dragProvider = dragProvider ?? { nil }
 
         closed = false
         if panel == nil {

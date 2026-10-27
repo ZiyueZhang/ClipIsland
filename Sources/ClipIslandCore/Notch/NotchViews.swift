@@ -46,7 +46,7 @@ public struct CollapsedStrip: View {
             }
             .frame(height: info.headerHeight)
             .frame(maxWidth: .infinity)
-            .background(StripShape(hasRealNotch: info.hasRealNotch).fill(Color.black))
+            .background(StripShape(hasRealNotch: info.hasRealNotch, topRadius: model.cornerTop, bottomRadius: model.cornerBottom).fill(Color.black))
         .scaleEffect(model.hoverInside && model.phase == .collapsed ? 1.02 : 1)
             .contentShape(Rectangle())
             .onTapGesture { model.toggle() }
@@ -187,17 +187,17 @@ public struct ExpandedPanel: View {
         .scaleEffect(model.phase == .expanded && !reduceMotion ? 1.0 : 0.97)
         .opacity(model.phase == .expanded || reduceMotion ? 1.0 : 0.6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(VisualEffectView(material: .hudWindow))
+        .background(PanelSurface(model: model))
         .clipShape(
             UnevenRoundedRectangle(
-                topLeadingRadius: 18, bottomLeadingRadius: 22,
-                bottomTrailingRadius: 22, topTrailingRadius: 18
+                topLeadingRadius: model.cornerTop, bottomLeadingRadius: model.cornerBottom,
+                bottomTrailingRadius: model.cornerBottom, topTrailingRadius: model.cornerTop
             )
         )
         .overlay(
             UnevenRoundedRectangle(
-                topLeadingRadius: 18, bottomLeadingRadius: 22,
-                bottomTrailingRadius: 22, topTrailingRadius: 18
+                topLeadingRadius: model.cornerTop, bottomLeadingRadius: model.cornerBottom,
+                bottomTrailingRadius: model.cornerBottom, topTrailingRadius: model.cornerTop
             )
             .stroke(.white.opacity(0.10), lineWidth: 1)
         )
@@ -751,6 +751,46 @@ private struct LockScreenView: View {
         guard !model.vaultPasswordField.isEmpty else { return }
         model.onVaultUnlockPassword?(model.vaultPasswordField)
         model.vaultPasswordField = ""
+    }
+}
+
+// MARK: - Surface (Liquid Glass on macOS 26+, vibrancy fallback)
+
+/// The expanded panel's material. On macOS 26+ this is the real system
+/// Liquid Glass (NSGlassEffectView, Sapphire's choice); corner radius follows
+/// the model so the glass morphs in lockstep with the window frame.
+struct PanelSurface: NSViewRepresentable {
+    let model: NotchModel
+
+    /// Glass is always rendered with a dark appearance (Sapphire's approach):
+    /// the panel content is light-on-dark, and glass would otherwise follow
+    /// the wallpaper and wash the text out on bright backgrounds. Set
+    /// CLIPISLAND_NO_GLASS=1 to force the vibrancy fallback (also used by the
+    /// offscreen renderer, where glass has no backdrop to sample).
+    func makeNSView(context: Context) -> NSView {
+        if #available(macOS 26.0, *), ProcessInfo.processInfo.environment["CLIPISLAND_NO_GLASS"] != "1" {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.tintColor = NSColor.black.withAlphaComponent(0.22)
+            glass.cornerRadius = model.cornerBottom
+            glass.appearance = NSAppearance(named: .darkAqua)
+            if #available(macOS 27.0, *) {
+                glass.effectIsInteractive = true
+            }
+            return glass
+        }
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        v.appearance = NSAppearance(named: .darkAqua)
+        return v
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        if #available(macOS 26.0, *), let glass = view as? NSGlassEffectView {
+            glass.cornerRadius = model.cornerBottom
+        }
     }
 }
 
