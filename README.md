@@ -34,6 +34,7 @@ ClipIsland lives in your MacBook's notch. Hover over it (or press ⌘⇧V) and a
 ## Features
 
 **Clipboard (full copyx-class feature set)**
+- Summon from anywhere in the menu bar (250ms dwell, click-suppression), not just the notch
 - Auto-captures text, links, file paths and images — deduplicated, searchable
 - Pin entries (exempt from eviction), delete, clear, capacity limit (100–2000, LRU)
 - Click = **copy + auto-paste** back into the app you came from (CGEvent ⌘V, can be set to copy-only)
@@ -44,7 +45,8 @@ ClipIsland lives in your MacBook's notch. Hover over it (or press ⌘⇧V) and a
 - ⌘⇧6 region capture: screen freeze, drag-select, live size label, crosshair
 - **Color picker**: live hex under the cursor while selecting, ⌘C to copy
 - ⏎ captures the full screen, Esc cancels, click cancels
-- Thumbnail "hangs" under the notch for 2.5s, auto-enters history, optional file save
+- Thumbnail "hangs" under the notch for 2.5s, auto-enters history (instantly pasteable), optional file save
+- Quick-action bar pops bottom-left: Copy / Edit / Reveal in Finder, 6s auto-dismiss (hover pauses)
 
 **Image editor (ShotX-style)**
 - Rectangle / ellipse / arrow / pen / text / highlight / **mosaic** / crop / move
