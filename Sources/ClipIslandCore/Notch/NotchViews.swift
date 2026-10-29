@@ -500,7 +500,7 @@ private struct ResultList: View {
 /// ~74KB of resident bitmap instead of ~24MB of full-resolution decode.
 @Observable
 public final class ThumbnailCache {
-    static let shared = ThumbnailCache()
+    public static let shared = ThumbnailCache()
 
     /// List thumbs render at 34pt; 136px covers 34pt @4x with headroom.
     static let maxPixel: Int = 136
@@ -549,7 +549,7 @@ public final class ThumbnailCache {
     }
 }
 
-struct ClipRow: View {
+public struct ClipRow: View {
     let item: ClipItem
     let digit: Int?
     let selected: Bool
@@ -562,7 +562,21 @@ struct ClipRow: View {
     let onOCR: (() -> Void)?
     let onHover: (Bool) -> Void
 
-    var body: some View {
+    public init(
+        item: ClipItem, digit: Int?, selected: Bool, hovered: Bool,
+        thumbnails: ThumbnailCache, onSelect: @escaping () -> Void,
+        onTogglePin: @escaping () -> Void, onDelete: @escaping () -> Void,
+        onEdit: (() -> Void)? = nil, onOCR: (() -> Void)? = nil,
+        onHover: @escaping (Bool) -> Void
+    ) {
+        self.item = item; self.digit = digit; self.selected = selected
+        self.hovered = hovered; self.thumbnails = thumbnails
+        self.onSelect = onSelect; self.onTogglePin = onTogglePin
+        self.onDelete = onDelete; self.onEdit = onEdit; self.onOCR = onOCR
+        self.onHover = onHover
+    }
+
+    public var body: some View {
         HStack(spacing: 10) {
             if let digit {
                 Text("\(digit)")
@@ -593,17 +607,21 @@ struct ClipRow: View {
 
             Spacer(minLength: 4)
 
-            if hovered {
-                rowButton(symbol: item.pinned ? "pin.fill" : "pin", action: onTogglePin)
-                    .help(item.pinned ? "取消置顶" : "置顶")
+            if item.kind == .image {
+                // Discoverability: the image-only actions stay visible on
+                // every image row; they brighten on hover.
                 if let onEdit {
-                    rowButton(symbol: "wand.and.stars", action: onEdit)
+                    rowButton(symbol: "wand.and.stars", action: onEdit, dim: !hovered)
                         .help("编辑")
                 }
                 if let onOCR {
-                    rowButton(symbol: "text.viewfinder", action: onOCR)
+                    rowButton(symbol: "text.viewfinder", action: onOCR, dim: !hovered)
                         .help("识别文字")
                 }
+            }
+            if hovered {
+                rowButton(symbol: item.pinned ? "pin.fill" : "pin", action: onTogglePin)
+                    .help(item.pinned ? "取消置顶" : "置顶")
                 rowButton(symbol: "trash", action: onDelete)
                     .help("删除")
             } else if item.pinned {
@@ -654,13 +672,14 @@ struct ClipRow: View {
         }
     }
 
-    private func rowButton(symbol: String, action: @escaping () -> Void) -> some View {
+    private func rowButton(symbol: String, action: @escaping () -> Void, dim: Bool = false) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(dim ? 0.35 : 0.65))
                 .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.white.opacity(0.10)))
+                .background(Circle().fill(Color.white.opacity(dim ? 0.05 : 0.10)))
+                .animation(.easeOut(duration: 0.12), value: dim)
         }
         .buttonStyle(.plain)
     }

@@ -77,6 +77,18 @@ final class RendererDelegate: NSObject, NSApplicationDelegate {
         pm.thumbnail = NSImage(contentsOfFile: tmp.path)
         pm.canReveal = true
         scenes.append(("popup-bar-dark", hosting(PostCaptureContentView(model: pm, onHoverChange: { _ in }).frame(width: 250, height: 168), dark: true)))
+
+        // Row action buttons: hovered image row vs resting image row
+        func rowScene(_ name: String, hovered: Bool) {
+            let row = ClipRow(
+                item: items[2], digit: 3, selected: false, hovered: hovered,
+                thumbnails: .shared, onSelect: {}, onTogglePin: {}, onDelete: {},
+                onEdit: {}, onOCR: {}, onHover: { _ in }
+            )
+            scenes.append((name, hosting(row.frame(width: 456, height: 50).background(Color.black), dark: true)))
+        }
+        rowScene("row-image-hovered", hovered: true)
+        rowScene("row-image-resting", hovered: false)
     }
 
     private func hosting(_ view: some View, dark: Bool) -> NSHostingView<some View> {

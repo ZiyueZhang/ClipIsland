@@ -3,6 +3,11 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.6.1] - 2026-10-30
+
+### Fixed
+- **Image actions are now always visible**: 编辑/OCR buttons used to appear only while hovering a row — undiscoverable. Image rows now show both buttons at rest (dimmed 35%) and brighten on hover; 置顶/删除 remain hover-only. Verified with new row-render scenes (hovered/resting) in RenderTool.
+
 ## [1.6.0] - 2026-10-30
 
 ### Changed — jank elimination + element redesign (user-driven)
