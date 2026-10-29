@@ -44,7 +44,20 @@ public final class NotchWindowController {
             model?.handlePanelKey(event) ?? false
         }
         observeScreenChanges()
+        // Fade the island in on launch — an abrupt pop reads as a glitch.
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.alphaValue = 1
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.5
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    self?.panel.animator().alphaValue = 1
+                }
+            }
+        }
         log("notch window ready on \(layout.screen.localizedName), realNotch=\(layout.hasRealNotch)")
     }
 

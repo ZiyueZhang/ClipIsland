@@ -8,6 +8,8 @@ import SwiftUI
 @Observable
 public final class PostCaptureModel {
     public init() {}
+    /// Drives the entrance (scale + rise + fade) once the panel is on screen.
+    public var appeared = false
     public var thumbnail: NSImage?
     public var canReveal = false
     public var onCopy: () -> Void = {}
@@ -43,15 +45,20 @@ public final class PostCaptureBar {
         model.dragProvider = dragProvider ?? { nil }
 
         closed = false
+        model.appeared = false
         if panel == nil {
             buildPanel()
         }
         positionAndShow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.model.appeared = true
+        }
         scheduleDismiss()
     }
 
     public func hide() {
         closed = true
+        model.appeared = false
         dismissTask?.cancel()
         panel?.orderOut(nil)
     }
@@ -146,6 +153,15 @@ public struct PostCaptureContentView: View {
         }
         .padding(12)
         .frame(width: 250, height: 168)
+        .scaleEffect(model.appeared ? 1.0 : 0.92)
+        .offset(y: model.appeared ? 0 : 14)
+        .opacity(model.appeared ? 1 : 0)
+        .animation(
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil
+                : .spring(response: 0.4, dampingFraction: 0.78),
+            value: model.appeared
+        )
         .background(
             ZStack {
                 VisualEffectView(material: .hudWindow)

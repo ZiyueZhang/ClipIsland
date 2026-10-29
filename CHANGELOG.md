@@ -3,6 +3,18 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.5.0] - 2026-10-28
+
+### Added — macOS-grade motion pass
+- **Materialize transition**: panel content condenses from a soft blur, slightly below its final position (Sapphire's blur cross-fade) on every expand/collapse
+- **Selection highlight glides** between rows via matchedGeometryEffect (System Settings sidebar style) instead of blinking between rows
+- **Popup entrance**: scale 0.92 + rise 14pt + fade on a 0.4/0.78 spring (shotx's entrance curve)
+- **Hanging thumbnail "clips onto the line"**: drops in with a -3° tilt that the spring overshoot settles — tendedero's physical personality
+- Clip count rolls with a numericText transition on the strip
+- Row hover highlight gets a 0.12s ease-out; island window fades in on launch instead of popping
+
+All new motion is gated by Reduce Motion.
+
 ## [1.4.0] - 2026-10-28
 
 ### Added

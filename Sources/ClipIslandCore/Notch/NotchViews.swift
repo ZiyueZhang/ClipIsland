@@ -2,6 +2,49 @@ import SwiftUI
 
 // MARK: - Root
 
+/// macOS-style "materialize": incoming content condenses from a soft blur
+/// slightly below its final position (Sapphire's blur cross-fade).
+struct MaterializeModifier: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: active ? 8 : 0)
+            .scaleEffect(active ? 0.985 : 1)
+            .offset(y: active ? 10 : 0)
+            .opacity(active ? 0 : 1)
+    }
+}
+
+extension AnyTransition {
+    static var materialize: AnyTransition {
+        .modifier(
+            active: MaterializeModifier(active: true),
+            identity: MaterializeModifier(active: false)
+        )
+    }
+}
+
+/// A screenshot "clipping onto the line": drops in from slightly above with
+/// a small counter-clockwise tilt; the spring overshoot settles the tilt.
+struct HangClipModifier: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(active ? 0.6 : 1)
+            .rotationEffect(.degrees(active ? -3 : 0))
+            .offset(y: active ? -8 : 0)
+            .opacity(active ? 0 : 1)
+    }
+}
+
+extension AnyTransition {
+    static var hangClip: AnyTransition {
+        .modifier(active: HangClipModifier(active: true), identity: HangClipModifier(active: false))
+    }
+}
+
 struct NotchRootView: View {
     let model: NotchModel
     let info: NotchDisplayInfo
@@ -10,10 +53,10 @@ struct NotchRootView: View {
         ZStack {
             if model.phase == .collapsed {
                 CollapsedStrip(model: model, info: info)
-                    .transition(.opacity)
+                    .transition(.materialize)
             } else {
                 ExpandedPanel(model: model, info: info)
-                    .transition(.opacity)
+                    .transition(.materialize)
             }
         }
         .onHover { inside in
@@ -62,7 +105,7 @@ public struct CollapsedStrip: View {
                             .stroke(.white.opacity(0.18), lineWidth: 1)
                     )
                     .shadow(color: .black.opacity(0.45), radius: 10, y: 5)
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .transition(.hangClip)
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.75), value: model.hangingImage != nil)
@@ -115,7 +158,9 @@ private struct RightIslandText: View {
                 Text("\(model.clipCount)")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .monospacedDigit()
+                    .contentTransition(.numericText())
                     .foregroundStyle(.white.opacity(0.9))
+                    .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8), value: model.clipCount)
             }
         }
         .lineLimit(1)
@@ -386,6 +431,7 @@ private struct FilterChips: View {
 
 private struct ResultList: View {
     let model: NotchModel
+    @Namespace private var selectionNS
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -408,12 +454,26 @@ private struct ResultList: View {
                                 model.hoveredItemID = inside ? item.id : nil
                             }
                         )
+                        // The selection highlight is a single view that
+                        // glides between rows (System Settings sidebar style).
+                        .background {
+                            if index == model.selectedIndex {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.accentColor.opacity(0.16))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+                                    )
+                                    .matchedGeometryEffect(id: "selection", in: selectionNS)
+                            }
+                        }
                         .id(item.id)
                         .onTapGesture { model.onSelectItem?(item) }
                         .onDrag { model.dragProvider?(item) ?? ClipRow.dragProvider(for: item) }
                     }
                 }
                 .padding(.vertical, 2)
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85), value: model.selectedIndex)
             }
             .onChange(of: model.selectedIndex) { _, newValue in
                 guard model.results.indices.contains(newValue) else { return }
@@ -561,11 +621,8 @@ struct ClipRow: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(selected ? Color.accentColor.opacity(0.16) : (hovered ? Color.primary.opacity(0.05) : .clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(selected ? Color.accentColor.opacity(0.35) : .clear, lineWidth: 1)
+                .fill(hovered ? Color.primary.opacity(0.05) : .clear)
+                .animation(.easeOut(duration: 0.12), value: hovered)
         )
         .contentShape(Rectangle())
         .onHover { onHover($0) }
