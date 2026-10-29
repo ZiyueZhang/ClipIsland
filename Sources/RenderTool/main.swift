@@ -41,7 +41,7 @@ final class RendererDelegate: NSObject, NSApplicationDelegate {
             ClipItem(id: 4, kind: .text, text: "4231 8890 2233 0912", sourceName: "Numbers", createdAt: now.addingTimeInterval(-3600), pinned: true),
         ]
         let info = NotchDisplayInfo(
-            hasRealNotch: true, headerHeight: 38, panelWidth: 660,
+            hasRealNotch: true, headerHeight: 38, panelWidth: 480,
             notchWidth: 216, stripExtensionLeft: 150, stripExtensionRight: 110
         )
 
@@ -62,10 +62,10 @@ final class RendererDelegate: NSObject, NSApplicationDelegate {
         let locked = model([], locked: true, pending: 2)
 
         // Expanded panel: lived-in / empty / locked
-        scenes.append(("panel-lived-dark", hosting(ExpandedPanel(model: live, info: info).frame(width: 660, height: 430), dark: true)))
-        scenes.append(("panel-lived-light", hosting(ExpandedPanel(model: live, info: info).frame(width: 660, height: 430), dark: false)))
-        scenes.append(("panel-empty-dark", hosting(ExpandedPanel(model: empty, info: info).frame(width: 660, height: 430), dark: true)))
-        scenes.append(("panel-locked-dark", hosting(ExpandedPanel(model: locked, info: info).frame(width: 660, height: 430), dark: true)))
+        scenes.append(("panel-lived-dark", hosting(ExpandedPanel(model: live, info: info).frame(width: 480, height: 440), dark: true)))
+        scenes.append(("panel-lived-light", hosting(ExpandedPanel(model: live, info: info).frame(width: 480, height: 440), dark: false)))
+        scenes.append(("panel-empty-dark", hosting(ExpandedPanel(model: empty, info: info).frame(width: 480, height: 440), dark: true)))
+        scenes.append(("panel-locked-dark", hosting(ExpandedPanel(model: locked, info: info).frame(width: 480, height: 440), dark: true)))
 
         // Collapsed strip at true notch size — plus the extended design.
         let stripModel = model(items)

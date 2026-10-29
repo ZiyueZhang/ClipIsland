@@ -151,17 +151,18 @@ public final class NotchWindowController {
             // Corner radii ride the same physics: content and window morph
             // in lockstep (boring.notch's animatable radii, Sapphire's single
             // motion system).
-            let span = abs(lastFrom.width - lastTo.width)
-            let t = span > 1 ? max(0, min(1, (frame.width - min(lastFrom.width, lastTo.width)) / span)) : (phase == .expanded ? 1 : 0)
+            // Expansion is height-only now — progress comes from height.
+            let span = abs(lastFrom.height - lastTo.height)
+            let t = span > 1 ? max(0, min(1, (frame.height - min(lastFrom.height, lastTo.height)) / span)) : (phase == .expanded ? 1 : 0)
             if phase == .expanded {
-                self.model.cornerTop = 6 + (18 - 6) * CGFloat(t)
+                self.model.cornerTop = 6 + (8 - 6) * CGFloat(t)
                 self.model.cornerBottom = 14 + (26 - 14) * CGFloat(t)
             }
         }
         lastFrom = from
         lastTo = target
         if phase == .expanded, NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            model.cornerTop = 18
+            model.cornerTop = 8
             model.cornerBottom = 26
         }
         if phase == .expanded {

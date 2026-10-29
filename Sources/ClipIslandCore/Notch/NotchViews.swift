@@ -232,7 +232,9 @@ public struct ExpandedPanel: View {
         .scaleEffect(model.phase == .expanded && !reduceMotion ? 1.0 : 0.97)
         .opacity(model.phase == .expanded || reduceMotion ? 1.0 : 0.6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PanelSurface(model: model))
+        // Solid black monolith: the notch appears to grow downward
+        // (boring.notch's aesthetic — and it fuses with the strip perfectly).
+        .background(Color.black)
         .clipShape(
             UnevenRoundedRectangle(
                 topLeadingRadius: model.cornerTop, bottomLeadingRadius: model.cornerBottom,
@@ -244,9 +246,9 @@ public struct ExpandedPanel: View {
                 topLeadingRadius: model.cornerTop, bottomLeadingRadius: model.cornerBottom,
                 bottomTrailingRadius: model.cornerBottom, topTrailingRadius: model.cornerTop
             )
-            .stroke(.white.opacity(0.10), lineWidth: 1)
+            .stroke(.white.opacity(0.08), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.4), radius: 28, y: 14)
+        .shadow(color: .black.opacity(0.45), radius: 26, y: 12)
     }
 }
 
@@ -256,20 +258,20 @@ private struct PanelContent: View {
     var body: some View {
         VStack(spacing: 10) {
             SearchFieldView(model: model)
-                .padding(.leading, 26)
+                .padding(.leading, 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(0.07))
+                    RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.white.opacity(0.08))
                 )
                 .overlay(alignment: .leading) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 9)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.leading, 10)
                 }
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.primary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(Color.white.opacity(0.10))
                 )
             FilterChips(model: model)
 
@@ -285,7 +287,7 @@ private struct PanelContent: View {
 
             FooterBar(model: model)
         }
-        .padding(14)
+        .padding(12)
         .padding(.bottom, 2)
         .onAppear { model.reloadResults() }
     }
@@ -341,13 +343,20 @@ struct SearchFieldView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> PanelSearchField {
         let field = PanelSearchField()
-        field.placeholderString = "搜索剪贴板…"
+        field.placeholderAttributedString = NSAttributedString(
+            string: "搜索剪贴板…",
+            attributes: [
+                .foregroundColor: NSColor.white.withAlphaComponent(0.35),
+                .font: NSFont.systemFont(ofSize: 13),
+            ]
+        )
         field.font = .systemFont(ofSize: 13)
         field.focusRingType = .none
         field.bezelStyle = .roundedBezel
         field.isBordered = false
         field.drawsBackground = false
-        field.textColor = .labelColor
+        field.textColor = .white
+
         field.stringValue = model.query
         field.onSpecialKey = { [weak model] key in
             model?.handleSpecial(key)
@@ -417,11 +426,11 @@ private struct FilterChips: View {
             .background(
                 Capsule().fill(
                     selected
-                        ? Color.accentColor.opacity(0.9)
-                        : Color.primary.opacity(0.08)
+                        ? Color.accentColor
+                        : Color.white.opacity(0.08)
                 )
             )
-            .foregroundStyle(selected ? Color.white : Color.secondary)
+            .foregroundStyle(selected ? Color.white : Color.white.opacity(0.65))
         }
         .buttonStyle(.plain)
     }
@@ -557,17 +566,17 @@ struct ClipRow: View {
         HStack(spacing: 10) {
             if let digit {
                 Text("\(digit)")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 18, height: 18)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.09)))
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: 18, height: 18)
             }
 
             Image(systemName: item.kind.symbolName)
                 .font(.system(size: 12))
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(Color.white.opacity(0.45))
                 .frame(width: 16)
 
             if item.kind == .image {
@@ -577,10 +586,10 @@ struct ClipRow: View {
             }
 
             Text(item.displayText)
-                .font(.system(size: 12))
+                .font(.system(size: 12.5))
                 .lineLimit(2)
                 .truncationMode(.tail)
-                .foregroundStyle(Color.primary.opacity(0.9))
+                .foregroundStyle(Color.white.opacity(0.92))
 
             Spacer(minLength: 4)
 
@@ -606,12 +615,12 @@ struct ClipRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(TimeFormat.relative(item.createdAt))
                     .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.white.opacity(0.4))
                     .monospacedDigit()
                 if let app = item.sourceName {
                     Text(app)
                         .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.white.opacity(0.3))
                         .lineLimit(1)
                 }
             }
@@ -621,7 +630,7 @@ struct ClipRow: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(hovered ? Color.primary.opacity(0.05) : .clear)
+                .fill(hovered ? Color.white.opacity(0.06) : .clear)
                 .animation(.easeOut(duration: 0.12), value: hovered)
         )
         .contentShape(Rectangle())
@@ -649,9 +658,9 @@ struct ClipRow: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.6))
                 .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.primary.opacity(0.08)))
+                .background(Circle().fill(Color.white.opacity(0.10)))
         }
         .buttonStyle(.plain)
     }
@@ -683,10 +692,10 @@ private struct EmptyState: View {
         VStack(spacing: 8) {
             Image(systemName: query.isEmpty ? "clipboard" : "magnifyingglass")
                 .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.white.opacity(0.25))
             Text(query.isEmpty ? "剪贴板历史为空\n复制点什么吧" : "没有匹配的结果")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.45))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -706,20 +715,25 @@ private struct FooterBar: View {
             Spacer()
             Text(model.paused ? "监控已暂停" : "监控中 · \(model.clipCount) 条")
                 .font(.system(size: 10))
-                .foregroundStyle(model.paused ? Color.orange : Color.secondary)
+                .foregroundStyle(model.paused ? Color.orange : Color.white.opacity(0.45))
         }
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Text(key)
-                .font(.system(size: 9, weight: .medium))
-                .padding(.horizontal, 4)
+                .font(.system(size: 9, weight: .semibold))
+                .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.10))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.10)))
+                )
+                .foregroundStyle(.white.opacity(0.75))
             Text(label)
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.45))
         }
     }
 }

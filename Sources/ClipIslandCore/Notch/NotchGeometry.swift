@@ -12,7 +12,9 @@ public struct NotchLayout {
     public let collapsedFrame: CGRect
     public let expandedFrame: CGRect
 
-    public static let panelSize = CGSize(width: 660, height: 430)
+    /// The expanded panel keeps the strip's exact width — expansion animates
+    /// height only, so nothing reflows horizontally mid-animation (no jank).
+    public static let panelSize = CGSize(width: 480, height: 440)
     public static let simulatedNotch = CGSize(width: 210, height: 32)
     /// The collapsed strip extends past the hardware notch into the menu-bar
     /// areas on both sides so its content is actually visible — the notch
@@ -65,9 +67,9 @@ public struct NotchLayout {
         let panel = panelSize
         let expanded = snap(
             CGRect(
-                x: visible.midX - panel.width / 2,
+                x: collapsed.minX,
                 y: topY - panel.height,
-                width: panel.width,
+                width: collapsed.width,
                 height: panel.height
             ),
             scale: scale

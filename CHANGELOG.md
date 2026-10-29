@@ -3,6 +3,15 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.6.0] - 2026-10-30
+
+### Changed — jank elimination + element redesign (user-driven)
+- **Expansion is now height-only**: the expanded panel keeps the strip's exact width (480pt), so nothing reflows horizontally mid-animation — the stutter from the 480→660 width growth is gone entirely
+- **Solid black monolith panel** (boring.notch's aesthetic): the panel reads as the notch growing downward, fusing seamlessly with the strip and the hardware notch; the Liquid Glass surface is retired from the panel (washed out on bright wallpapers) — the type stays available behind PanelSurface
+- **Motion curves adopted from boring.notch exactly**: open spring 0.42/0.80, close 0.45/1.0 (critical damping)
+- Corner morph now derives from height progress (6/14 → 8/26)
+- **Element redesign for the black canvas**: search field with a visible container + bright placeholder, brighter chips and digit badges, keycap-style footer hints, white-tuned row text/time/source colors, placeholder color fix
+
 ## [1.5.0] - 2026-10-28
 
 ### Added — macOS-grade motion pass
