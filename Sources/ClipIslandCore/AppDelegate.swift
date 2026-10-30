@@ -121,6 +121,10 @@ public final class AppCoordinator: NSObject {
         paster?.imageLoader = { [weak self] item in
             self?.store?.decryptedImageData(for: item)
         }
+        paster?.richLoader = { [weak self] item in
+            guard let store = self?.store else { return (nil, nil) }
+            return store.decryptedRich(for: item)
+        }
         ThumbnailCache.storeLoader = { [weak self] item in
             self?.store?.downsampledThumbnail(for: item, maxPixel: ThumbnailCache.maxPixel)
         }

@@ -38,6 +38,10 @@ public struct ClipItem: Identifiable, Equatable {
     public var createdAt: Date
     public var pinned: Bool
     public let contentHash: String
+    /// Sealed rich-text payload (HTML flavor) captured alongside the text.
+    public let htmlPath: String?
+    /// Sealed RTF payload.
+    public let rtfPath: String?
     /// True while the vault is locked: content exists but is unreadable.
     public var redacted: Bool = false
 
@@ -52,6 +56,8 @@ public struct ClipItem: Identifiable, Equatable {
         createdAt: Date = Date(),
         pinned: Bool = false,
         contentHash: String = "",
+        htmlPath: String? = nil,
+        rtfPath: String? = nil,
         redacted: Bool = false
     ) {
         self.id = id
@@ -64,6 +70,8 @@ public struct ClipItem: Identifiable, Equatable {
         self.createdAt = createdAt
         self.pinned = pinned
         self.contentHash = contentHash
+        self.htmlPath = htmlPath
+        self.rtfPath = rtfPath
         self.redacted = redacted
     }
 
@@ -92,14 +100,19 @@ public struct NewClip {
     public var kind: ClipKind
     public var text: String?
     public var imageData: Data? // PNG bytes; the store writes it to disk
+    public var htmlData: Data?  // public.html flavor, captured with the text
+    public var rtfData: Data?   // public.rtf flavor
     public var sourceBundle: String?
     public var sourceName: String?
 
     public init(kind: ClipKind, text: String? = nil, imageData: Data? = nil,
+                htmlData: Data? = nil, rtfData: Data? = nil,
                 sourceBundle: String? = nil, sourceName: String? = nil) {
         self.kind = kind
         self.text = text
         self.imageData = imageData
+        self.htmlData = htmlData
+        self.rtfData = rtfData
         self.sourceBundle = sourceBundle
         self.sourceName = sourceName
     }

@@ -133,6 +133,17 @@ public final class ClipStore {
         );
         CREATE INDEX IF NOT EXISTS idx_clips_hash ON clips(content_hash);
         """)
+        // Lightweight migration: add rich-payload columns when upgrading from
+        // an older database.
+        let columns = try db.query("PRAGMA table_info(clips)", []) { stmt in
+            String(cString: sqlite3_column_text(stmt, 1))
+        }
+        if !columns.contains("html_path") {
+            try db.exec("ALTER TABLE clips ADD COLUMN html_path TEXT")
+        }
+        if !columns.contains("rtf_path") {
+            try db.exec("ALTER TABLE clips ADD COLUMN rtf_path TEXT")
+        }
         reload()
     }
 
@@ -181,8 +192,7 @@ public final class ClipStore {
             let name = UUID().uuidString + ".png"
             let url = directory.appendingPathComponent("images").appendingPathComponent(name)
             do {
-                let atRest = vault.isEnabled ? try vault.seal(data) : data
-                try atRest.write(to: url, options: .atomic)
+                try payloadForDisk(data).write(to: url, options: .atomic)
                 imagePath = url.path
                 if let rep = NSBitmapImageRep(data: data) {
                     imageSize = CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
@@ -199,10 +209,24 @@ public final class ClipStore {
         } else {
             storedText = clip.text
         }
+        // Rich payloads: sealed like images, capped, written next to them.
+        func storeRich(_ data: Data?, name: String) -> String? {
+            guard let data, data.count <= ClipboardMonitor.maxRichPayload else { return nil }
+            let url = directory.appendingPathComponent("images").appendingPathComponent(name)
+            do {
+                try payloadForDisk(data).write(to: url, options: .atomic)
+                return url.path
+            } catch {
+                log("rich payload write failed: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        let htmlPath = storeRich(clip.htmlData, name: UUID().uuidString + ".html")
+        let rtfPath = storeRich(clip.rtfData, name: UUID().uuidString + ".rtf")
         try? db.run(
             """
-            INSERT INTO clips(kind, text, image_path, image_w, image_h, source_bundle, source_name, created_at, pinned, content_hash)
-            VALUES(?,?,?,?,?,?,?,? ,0, ?)
+            INSERT INTO clips(kind, text, image_path, image_w, image_h, source_bundle, source_name, created_at, pinned, content_hash, html_path, rtf_path)
+            VALUES(?,?,?,?,?,?,?,? ,0, ?, ?, ?)
             """,
             [
                 .text(clip.kind.rawValue),
@@ -214,6 +238,8 @@ public final class ClipStore {
                 clip.sourceName.map { .text($0) } ?? .null,
                 .double(now.timeIntervalSince1970),
                 .text(hash),
+                htmlPath.map { .text($0) } ?? .null,
+                rtfPath.map { .text($0) } ?? .null,
             ]
         )
         let id = db.lastInsertRowID
@@ -221,7 +247,7 @@ public final class ClipStore {
             id: id, kind: clip.kind, text: clip.text, imagePath: imagePath,
             imageSize: imageSize, sourceBundle: clip.sourceBundle,
             sourceName: clip.sourceName, createdAt: now, pinned: false,
-            contentHash: hash
+            contentHash: hash, htmlPath: htmlPath, rtfPath: rtfPath
         )
         items.insert(item, at: insertionIndex(for: item))
         rebuildIndex()
@@ -243,7 +269,7 @@ public final class ClipStore {
     public func remove(id: Int64) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         let item = items.remove(at: idx)
-        if let path = item.imagePath {
+        for path in [item.imagePath, item.htmlPath, item.rtfPath].compactMap({ $0 }) {
             try? FileManager.default.removeItem(atPath: path)
         }
         try? db.run("DELETE FROM clips WHERE id = ?", [.int(Int(id))])
@@ -254,7 +280,7 @@ public final class ClipStore {
     /// Clears everything, including pinned items and image files.
     public func clear() {
         for item in items {
-            if let path = item.imagePath {
+            for path in [item.imagePath, item.htmlPath, item.rtfPath].compactMap({ $0 }) {
                 try? FileManager.default.removeItem(atPath: path)
             }
         }
@@ -266,18 +292,36 @@ public final class ClipStore {
 
     // MARK: - Vault surface
 
-    /// True when the file holds vault-sealed bytes (not a plain PNG).
+    /// Magic prefix marking vault-sealed payloads on disk (GCM output is
+    /// indistinguishable from random bytes, so sealed files carry "CIV1").
+    public static let sealMagic = Data("CIV1".utf8)
+
+    /// True when the file holds a vault-sealed payload. Unit tested.
     public func isSealedFile(_ path: String) -> Bool {
         guard let bytes = FileManager.default.contents(atPath: path) else { return false }
         return Self.isSealedData(bytes)
     }
 
-    /// Pure byte-sniffing: vault output starts with the GCM nonce, never with
-    /// the PNG magic. Unit tested.
     public static func isSealedData(_ bytes: Data) -> Bool {
-        guard bytes.count > 8 else { return false }
-        let pngMagic: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
-        return !Array(bytes.prefix(4)).elementsEqual(pngMagic)
+        bytes.prefix(sealMagic.count) == sealMagic
+    }
+
+    /// Bytes as they belong on disk: magic-prefixed sealed when the vault is
+    /// on, untouched when off.
+    func payloadForDisk(_ data: Data) throws -> Data {
+        guard vault.isEnabled else { return data }
+        let sealed = try vault.seal(data)
+        return Self.sealMagic + sealed
+    }
+
+    /// The inverse: opened plaintext when sealed, passthrough otherwise.
+    /// Returns nil only when the payload is sealed but the key is unavailable.
+    func payloadFromDisk(_ raw: Data) -> Data? {
+        guard Self.isSealedData(raw) else { return raw }
+        guard vault.isUnlocked, let opened = try? vault.open(raw.dropFirst(Self.sealMagic.count)) else {
+            return nil
+        }
+        return opened
     }
 
     /// Decrypted image bytes for a stored item (pasteboard, editor, Quick Look).
@@ -285,9 +329,7 @@ public final class ClipStore {
         guard let path = item.imagePath, let raw = FileManager.default.contents(atPath: path) else {
             return nil
         }
-        guard Self.isSealedData(raw) else { return raw }
-        guard vault.isUnlocked, let opened = try? vault.open(raw) else { return nil }
-        return opened
+        return payloadFromDisk(raw)
     }
 
     public func loadImage(for item: ClipItem) -> NSImage? {
@@ -308,6 +350,15 @@ public final class ClipStore {
             return nil
         }
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
+    /// Decrypted rich payloads for paste-back.
+    public func decryptedRich(for item: ClipItem) -> (html: Data?, rtf: Data?) {
+        func unseal(_ path: String?) -> Data? {
+            guard let path, let raw = FileManager.default.contents(atPath: path) else { return nil }
+            return payloadFromDisk(raw)
+        }
+        return (unseal(item.htmlPath), unseal(item.rtfPath))
     }
 
     /// After unlock: captures buffered in RAM while locked enter the store
@@ -331,17 +382,18 @@ public final class ClipStore {
             return
         }
         let rows = (try? db.query(
-            "SELECT id, kind, text, image_path FROM clips", [],
-            map: { stmt -> (Int64, String, String?, String?) in
+            "SELECT id, kind, text, image_path, html_path, rtf_path FROM clips", [],
+            map: { stmt -> (Int64, String, String?, String?, String?, String?) in
                 let id = sqlite3_column_int64(stmt, 0)
                 let kind = String(cString: sqlite3_column_text(stmt, 1))
-                let t = sqlite3_column_text(stmt, 2) != nil ? String(cString: sqlite3_column_text(stmt, 2)) : nil
-                let p = sqlite3_column_text(stmt, 3) != nil ? String(cString: sqlite3_column_text(stmt, 3)) : nil
-                return (id, kind, t, p)
+                func col(_ i: Int32) -> String? {
+                    sqlite3_column_text(stmt, i) != nil ? String(cString: sqlite3_column_text(stmt, i)) : nil
+                }
+                return (id, kind, col(2), col(3), col(4), col(5))
             }
         )) ?? []
         var migrated = 0
-        for (id, kind, storedText, imagePath) in rows {
+        for (id, kind, storedText, imagePath, htmlPath, rtfPath) in rows {
             do {
                 if enabled {
                     if let stored = storedText, !stored.hasPrefix(VaultCoding.textPrefix),
@@ -351,8 +403,14 @@ public final class ClipStore {
                     }
                     if kind == ClipKind.image.rawValue, let path = imagePath,
                        let bytes = FileManager.default.contents(atPath: path), !Self.isSealedData(bytes) {
-                        try vault.seal(bytes).write(to: URL(fileURLWithPath: path), options: .atomic)
+                        try payloadForDisk(bytes).write(to: URL(fileURLWithPath: path), options: .atomic)
                         migrated += 1
+                    }
+                    for richPath in [htmlPath, rtfPath].compactMap({ $0 }) {
+                        if let bytes = FileManager.default.contents(atPath: richPath), !Self.isSealedData(bytes) {
+                            try payloadForDisk(bytes).write(to: URL(fileURLWithPath: richPath), options: .atomic)
+                            migrated += 1
+                        }
                     }
                 } else {
                     if let stored = storedText, stored.hasPrefix(VaultCoding.textPrefix) {
@@ -382,7 +440,7 @@ public final class ClipStore {
 
     private func reload() {
         items = (try? db.query(
-            "SELECT id, kind, text, image_path, image_w, image_h, source_bundle, source_name, created_at, pinned, content_hash FROM clips ORDER BY pinned DESC, created_at DESC",
+            "SELECT id, kind, text, image_path, image_w, image_h, source_bundle, source_name, created_at, pinned, content_hash, html_path, rtf_path FROM clips ORDER BY pinned DESC, created_at DESC",
             []
         ) { stmt in
             func text(_ i: Int32) -> String? {
@@ -420,6 +478,8 @@ public final class ClipStore {
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 8)),
                 pinned: sqlite3_column_int(stmt, 9) != 0,
                 contentHash: text(10) ?? "",
+                htmlPath: text(11),
+                rtfPath: text(12),
                 redacted: redacted
             )
         }) ?? []

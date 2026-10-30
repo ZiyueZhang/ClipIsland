@@ -11,6 +11,8 @@ public final class AutoPaster {
     /// Set by the coordinator so image reads go through the vault
     /// (decrypt-at-use instead of raw file reads).
     public var imageLoader: ((ClipItem) -> Data?)?
+    /// Rich flavors for text items, decrypted from the vault on demand.
+    public var richLoader: ((ClipItem) -> (html: Data?, rtf: Data?))?
 
     public init(monitor: ClipboardMonitor) {
         self.monitor = monitor
@@ -68,6 +70,11 @@ public final class AutoPaster {
         switch item.kind {
         case .text:
             pb.setString(item.text ?? "", forType: .string)
+            // Rich flavors ride along: pasting into Pages/Mail keeps formatting.
+            if let rich = richLoader?(item) {
+                if let html = rich.html { pb.setData(html, forType: NSPasteboard.PasteboardType("public.html")) }
+                if let rtf = rich.rtf { pb.setData(rtf, forType: .rtf) }
+            }
         case .link:
             var objects: [NSPasteboardWriting] = [NSString(string: item.text ?? "")]
             if let url = URL(string: item.text ?? "") {

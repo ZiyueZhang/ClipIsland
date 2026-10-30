@@ -113,16 +113,25 @@ public final class ClipboardMonitor {
             return NewClip(kind: .file, text: urls.map(\.path).joined(separator: "\n"))
         }
 
-        // Plain string: classify as link or text.
-        guard let string = pb.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty else {
+        // Plain string: classify as link or text; keep the rich flavors
+        // (HTML/RTF) that browsers and rich editors attach alongside, so
+        // paste-back preserves formatting.
+        guard let raw = pb.string(forType: .string), !raw.isEmpty else {
             return nil
         }
+        let string = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !string.isEmpty else { return nil }
+        let html = pb.data(forType: NSPasteboard.PasteboardType("public.html"))
+        let rtf = pb.data(forType: .rtf)
         if isLink(string) {
-            return NewClip(kind: .link, text: string)
+            return NewClip(kind: .link, text: string, htmlData: html, rtfData: rtf)
         }
-        return NewClip(kind: .text, text: string)
+        return NewClip(kind: .text, text: string, htmlData: html, rtfData: rtf)
     }
+
+    /// Rich flavors above this size are dropped — a browser can attach
+    /// megabytes of markup for one paragraph.
+    public static let maxRichPayload = 512 * 1024
 
     public static func isLink(_ string: String) -> Bool {
         guard let url = URL(string: string),

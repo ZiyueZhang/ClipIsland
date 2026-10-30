@@ -440,10 +440,12 @@ do {
     let wrong = SymmetricKey(size: .bits256)
     expect((try? AES.GCM.open(try AES.GCM.SealedBox(combined: sealed), using: wrong)) == nil, "wrong key rejected")
 
-    // Sealed bytes never look like a PNG; plain PNG bytes never look sealed.
-    expect(ClipStore.isSealedData(sealed), "sealed bytes flagged")
+    // Sealed payloads carry the CIV1 magic on disk.
+    expect(!ClipStore.isSealedData(sealed), "raw gcm output is not a disk payload")
+    let onDisk = ClipStore.sealMagic + sealed
+    expect(ClipStore.isSealedData(onDisk), "magic-prefixed payload flagged")
     let pngMagic = Data([0x89, 0x50, 0x4E, 0x47]) + Data(repeating: 0, count: 16)
-    expect(!ClipStore.isSealedData(pngMagic), "png magic not flagged")
+    expect(!ClipStore.isSealedData(pngMagic), "png not flagged")
 }
 
 do {
@@ -563,6 +565,58 @@ do {
     // Custom padding honored.
     let tight = MenuBarHoverMonitor.dwellZone(stripFrame: strip, belowPadding: 0)
     expect(tight == strip, "zero padding = strip itself")
+}
+
+
+// MARK: - Rich content capture (HTML/RTF)
+
+do {
+    print("ClipboardMonitor: rich flavors")
+    let pb = freshPasteboard()
+    pb.clearContents()
+    pb.setString("富文本标题", forType: .string)
+    pb.setData(Data("<h1>富文本标题</h1>".utf8), forType: NSPasteboard.PasteboardType("public.html"))
+    let clip = ClipboardMonitor.capture(from: pb)
+    expect(clip?.htmlData != nil, "html flavor captured")
+    expect(clip?.text == "富文本标题", "plain text alongside")
+}
+
+do {
+    print("ClipStore: rich payload at rest + paste-back")
+    let suite = UserDefaults(suiteName: "selftest-rich-\(UUID().uuidString)")!
+    let vault = Vault(defaults: suite)
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("clipisland-rich-\(UUID().uuidString)")
+    let store = try ClipStore(directory: dir, vault: vault)
+
+    // Plaintext mode baseline.
+    let html = Data("<b>bold 内容</b>".utf8)
+    store.add(NewClip(kind: .text, text: "rich row", htmlData: html))
+    var item = store.all[0]
+    expect(item.htmlPath != nil, "html stored to file")
+    var isDir: ObjCBool = false
+    expect(FileManager.default.fileExists(atPath: item.htmlPath!, isDirectory: &isDir), "html file exists")
+    expect(store.decryptedRich(for: item).html == html, "decrypt round trip (plain mode)")
+
+    // Enable vault: migration seals the rich file.
+    try vault.setup(password: "test1234")
+    store.migrateAll(enabled: true)
+    item = store.all[0]
+    let sealedBytes = FileManager.default.contents(atPath: item.htmlPath!)
+    expect(sealedBytes.map { ClipStore.isSealedData($0) } == true, "rich payload sealed under vault")
+    expect(store.decryptedRich(for: item).html == html, "decrypt round trip (vault)")
+
+    // Paste-back flavors through AutoPaster (it writes the general pasteboard).
+    let paster = AutoPaster(monitor: ClipboardMonitor())
+    paster.richLoader = { [weak store] it in store?.decryptedRich(for: it) ?? (nil, nil) }
+    paster.writeToPasteboard(item)
+    let gen = NSPasteboard.general
+    expect(gen.string(forType: .string) == "rich row", "string flavor present")
+    expect(gen.data(forType: NSPasteboard.PasteboardType("public.html")) == html, "html flavor pasted back")
+
+    // Removal cleans the rich file.
+    store.remove(id: item.id)
+    expect(!FileManager.default.fileExists(atPath: item.htmlPath!), "rich file removed with the row")
 }
 
 print("")

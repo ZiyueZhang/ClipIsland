@@ -3,6 +3,13 @@
 All notable changes to ClipIsland are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.7.0] - 2026-10-30
+
+### Added — rich content capture
+- **HTML/RTF flavors are now captured alongside the plain text**: copying from browsers and rich editors keeps a sealed copy of the markup; pasting the entry back into Pages/Mail/an editor writes the string + HTML + RTF flavors together, so formatting survives the round trip (runtime-verified: clipboard info shows the HTML flavor after paste-back)
+- Sealed payloads on disk now carry a `CIV1` magic prefix (GCM output is indistinguishable from random bytes; the old "not-a-PNG" heuristic misclassified HTML/RTF) — with a schema migration for the new columns and in-place re-sealing of existing payloads
+- Rich payloads are capped at 512KB, sealed under the vault like images, deleted with their row, and included in enable/disable migration
+
 ## [1.6.1] - 2026-10-30
 
 ### Fixed
