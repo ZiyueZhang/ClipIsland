@@ -146,9 +146,10 @@ Sources/
 ## 路线图
 
 - [ ] 录屏与 GIF 导出
-- [ ] 端到端加密（主密码 + Touch ID 解锁）
+- [x] ~~端到端加密~~（v1.2.0 已交付：AES-GCM + PBKDF2 + 触控 ID + 自动锁定）
+- [x] ~~富内容捕获~~（v1.7.0 已交付：HTML/RTF 随条目捕获并保格式回贴）
+- [ ] 面板内富文本预览（HTML/RTF 已捕获，预览渲染待做）
 - [ ] 可插拔"岛"模块（天气 / 番茄钟 / 正在播放）
-- [ ] 富内容粘贴预览
 
 完整验收矩阵与设计笔记见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。灵感来自 [copyx](https://github.com/yuuuuuuanhua/copyx)、[ShotX](https://github.com/aimen08/shotx)、[Sapphire](https://github.com/cshariq/Sapphire) 与 [tendedero](https://github.com/alejandrobujan/tendedero)。
 

@@ -146,9 +146,10 @@ Sources/
 ## Roadmap
 
 - [ ] Screen recording & GIF export
-- [ ] End-to-end encryption (master password + Touch ID unlock)
+- [x] ~~End-to-end encryption~~ (shipped in v1.2.0: AES-GCM + PBKDF2 + Touch ID + auto-lock)
+- [x] ~~Rich content capture~~ (shipped in v1.7.0: HTML/RTF captured per entry, format-preserving paste-back)
+- [ ] In-panel rich preview (HTML/RTF is captured; rendering pending)
 - [ ] Pluggable island modules (weather, pomodoro, now-playing)
-- [ ] Paste-preview for rich content
 
 See [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) for the full acceptance matrix and design notes. Inspired by [copyx](https://github.com/yuuuuuuanhua/copyx), [ShotX](https://github.com/aimen08/shotx), [Sapphire](https://github.com/cshariq/Sapphire) and [tendedero](https://github.com/alejandrobujan/tendedero).
 
